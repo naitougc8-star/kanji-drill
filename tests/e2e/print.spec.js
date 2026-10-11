@@ -82,6 +82,7 @@ test('問題プリントをなぞって読み取り、答えを選んで出題�
     const spec = JSON.parse(fs.readFileSync(`tests/fixtures/${name}.json`, 'utf8'));
     await page.setInputFiles('#photo', `tests/fixtures/${name}.png`);
     await expect(page.locator('#marker-canvas')).toBeVisible();
+    await page.locator('label', { hasText: '1 問ずつなぞる' }).click();
     if (name === 'print-bracket') await page.locator('label', { hasText: '太' }).click();
     await traceItems(page, spec);
     await expect(page.locator('#mark-status')).toHaveText(`${spec.items.length} 問をなぞりました。`);
@@ -145,6 +146,7 @@ test('問題プリント: 回転・ズーム・一つ戻す・指で動かす', 
   await page.setInputFiles('#photo', 'tests/fixtures/print-horizontal.png');
   const canvas = page.locator('#marker-canvas');
   await expect(canvas).toBeVisible();
+  await page.locator('label', { hasText: '1 問ずつなぞる' }).click();
   const w0 = (await canvas.boundingBox()).width;
   const h0 = (await canvas.boundingBox()).height;
 
@@ -178,4 +180,73 @@ test('問題プリント: 回転・ズーム・一つ戻す・指で動かす', 
   const r = await canvas.boundingBox();
   expect(r.height / r.width).toBeCloseTo(w0 / h0, 1);
   await expect(page.locator('#btn-read-marks')).toBeDisabled();
+});
+
+test('表のプリント: 表を囲む → 1 列ずつ自動で切り出す → カタカナを自動で選ぶ → 答えを確かめて出題', async ({ page, baseURL }) => {
+  test.setTimeout(300_000);
+  const problems = watch(page, baseURL);
+  const spec = JSON.parse(fs.readFileSync('tests/fixtures/print-table.json', 'utf8'));
+  await page.goto('./');
+  await page.evaluate(() => localStorage.clear());
+  await page.reload();
+  await page.setInputFiles('#photo', 'tests/fixtures/print-table.png');
+  const canvas = page.locator('#marker-canvas');
+  await expect(canvas).toBeVisible();
+  await expect(page.locator('input[name="tool"][value="box"]')).toBeChecked(); // 初期値は「表を囲む」
+  await expect(page.locator('#btn-read-marks')).toBeEnabled(); // 囲まなくても読み取れる
+
+  // 表を四角く囲む(少し外側から)
+  const box = await canvas.boundingBox();
+  const k = box.width / spec.width;
+  const [tx, ty, tw, th] = spec.table;
+  await page.mouse.move(box.x + (tx - 12) * k, box.y + (ty - 12) * k);
+  await page.mouse.down();
+  await page.mouse.move(box.x + (tx + tw + 12) * k, box.y + (ty + th + 12) * k, { steps: 10 });
+  await page.mouse.up();
+  await expect(page.locator('#mark-status')).toContainText('表の範囲を囲みました');
+
+  await page.click('#btn-read-marks');
+  await expect(page.locator('#mark-status')).toContainText('問を読み取りました', { timeout: 120_000 });
+  const items = page.locator('#print-items > li');
+  await expect(items).toHaveCount(spec.items.length); // 10 列
+
+  let fixes = 0, top1 = 0;
+  for (let i = 0; i < spec.items.length; i++) {
+    const it = spec.items[i];
+    const li = items.nth(i);
+    const text = await li.locator('input.pline').inputValue();
+    const reading = it.target.replace(/[\u30A1-\u30F6]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60));
+    let ans = li.locator(`.answer[data-reading="${reading}"]`);
+    // カタカナが自動で選ばれていること(読み違えていたら、文字欄を直す)
+    if ((await ans.count()) === 0 || !text.includes(it.target)) {
+      fixes++;
+      console.log(`  読み違いを手で直した: 「${text}」→「${it.before}${it.target}${it.after}」`);
+      const line = li.locator('input.pline');
+      await line.fill(it.before + it.target + it.after);
+      await line.press('Enter');
+      await line.blur();
+      ans = items.nth(i).locator(`.answer[data-reading="${reading}"]`);
+    }
+    await expect(ans).toHaveCount(1);
+    const cand = ans.locator('.cand', { hasText: new RegExp(`^${it.answer}$`) });
+    await expect(cand).toBeVisible({ timeout: 60_000 });
+    const list = await ans.locator('.cand').allTextContents();
+    if (list[0] === it.answer) top1++;
+    console.log(`${i + 1}: 「${text}」 ${it.target} → ${list.slice(0, 4).join(' ')}${list[0] === it.answer ? '(1 位)' : ''}`);
+    await cand.click();
+  }
+  console.log(`読み違いを直した問題: ${fixes} / 10、正解が候補の 1 位: ${top1} / 10`);
+  expect(fixes).toBeLessThanOrEqual(1);
+
+  await page.click('#btn-add-print');
+  await expect(page.locator('#print-add-status')).toContainText('10 語を語の一覧に追加しました');
+  await page.click('#btn-none');
+  await page.locator('#word-list li[data-word="預ける"] .on input').check();
+  await page.click('#btn-start');
+  await expect(page.locator('#reading')).toHaveText('あずける');
+  await expect(page.locator('#context')).toContainText('荷物を');
+  await expect(page.locator('#cells .cell')).toHaveCount(1); // 「預」+「ける」
+  await expect(page.locator('#cells .kana')).toHaveText('ける');
+
+  expect(problems, problems.join('\n')).toEqual([]);
 });

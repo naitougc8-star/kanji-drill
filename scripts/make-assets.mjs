@@ -121,4 +121,45 @@ for (const [name, spec] of Object.entries(PRINTS)) {
   console.log(path.relative(ROOT, file));
 }
 
+// 表の形式の漢字テスト(縦書き・番号の段・罫線・書き取る部分はカタカナ・下に答えの段)。
+// 写真らしく、少し傾け、紙の色と明るさのむらを付ける。
+{
+  const items = [
+    { before: '天気', target: 'ヨホウ', after: '', answer: '予報' },
+    { before: '', target: 'ケイザイ', after: 'の話', answer: '経済' },
+    { before: '', target: 'ユウビン', after: '局', answer: '郵便' },
+    { before: '', target: 'シゼン', after: 'を守る', answer: '自然' },
+    { before: '', target: 'キケン', after: 'な道', answer: '危険' },
+    { before: '荷物を', target: 'アズケル', after: '', answer: '預ける' },
+    { before: '', target: 'ドクショ', after: '感想文', answer: '読書' },
+    { before: '地図を', target: 'ヒロゲル', after: '', answer: '広げる' },
+    { before: '', target: 'カンキョウ', after: '問題', answer: '環境' },
+    { before: '列車が', target: 'テイシャ', after: 'する', answer: '停車' },
+  ];
+  const W = 1500, H = 760;
+  await page.setViewportSize({ width: W, height: H });
+  const cols = items
+    .map((it, i) => `<td><div class="no">${i + 1}</div><div class="q">${it.before}${it.target}${it.after}</div><div class="ans"></div></td>`)
+    .reverse()
+    .join('');
+  await page.setContent(`<html><head><style>
+    body{margin:0;width:${W}px;height:${H}px;overflow:hidden;
+      background:radial-gradient(ellipse at 30% 40%, #f1eee6 0%, #d9d4c8 70%, #c9c3b6 100%);}
+    table{position:absolute;left:70px;top:40px;border-collapse:collapse;transform:rotate(1.2deg);transform-origin:50% 50%;
+      font-family:'Yu Gothic','YuGothic','Meiryo',sans-serif;font-weight:700;color:#262626;}
+    td{border:3px solid #2b2b2b;width:118px;padding:0;vertical-align:top;}
+    .no{height:58px;border-bottom:3px solid #2b2b2b;text-align:center;font:italic 34px serif;line-height:58px;}
+    .q{writing-mode:vertical-rl;margin:12px auto 0;font-size:50px;height:540px;letter-spacing:2px;}
+    .ans{height:70px;border-top:3px solid #2b2b2b;}
+  </style></head><body><table><tr>${cols}</tr></table></body></html>`);
+  const box = await page.evaluate(() => {
+    const r = document.querySelector('table').getBoundingClientRect();
+    return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)];
+  });
+  const file = path.join(ROOT, 'tests/fixtures/print-table.png');
+  await page.screenshot({ path: file });
+  fs.writeFileSync(path.join(ROOT, 'tests/fixtures/print-table.json'), JSON.stringify({ width: W, height: H, table: box, items }, null, 1));
+  console.log(path.relative(ROOT, file));
+}
+
 await browser.close();

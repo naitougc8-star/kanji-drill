@@ -41,6 +41,8 @@ export class Marker {
     this.zoom = 1;
     this.brush = 'medium';
     this.mode = 'draw'; // 'draw' | 'move'(Pencil がないときだけ使う)
+    this.tool = 'box'; // 'box'(表を四角で囲む)| 'trace'(1 問ずつなぞる)
+    this.box = null; // 囲んだ範囲 { x, y, w, h }(元画像の px)
     this.marks = []; // { points: [[x, y], ...], width }(元画像の px)
     this.current = null;
     canvas.addEventListener('pointerdown', (e) => this.down(e));
@@ -56,6 +58,7 @@ export class Marker {
     this.turns = 0;
     this.zoom = 1;
     this.marks = [];
+    this.box = null;
     this.src = toSourceCanvas(img, 0);
     this.layout();
     this.onChange();
@@ -65,7 +68,8 @@ export class Marker {
     if (!this.img) return;
     this.turns = (this.turns + 1) % 4;
     this.src = toSourceCanvas(this.img, this.turns);
-    this.marks = []; // 向きが変わるので、なぞった跡は消す
+    this.marks = []; // 向きが変わるので、なぞった跡・囲んだ範囲は消す
+    this.box = null;
     this.layout();
     this.onChange();
   }
@@ -73,6 +77,12 @@ export class Marker {
   setZoom(z) {
     this.zoom = Math.max(1, Math.min(4, z));
     this.layout();
+  }
+
+  setTool(tool) {
+    this.tool = tool;
+    this.redraw();
+    this.onChange();
   }
 
   setMode(mode) {
@@ -127,7 +137,11 @@ export class Marker {
       /* window の pointerup で終える */
     }
     this.rect = this.canvas.getBoundingClientRect();
-    this.current = { id: e.pointerId, points: [this.toSource(e)], width: BRUSH[this.brush] * this.scale };
+    const p = this.toSource(e);
+    this.current =
+      this.tool === 'box'
+        ? { id: e.pointerId, box: true, start: p, end: p }
+        : { id: e.pointerId, points: [p], width: BRUSH[this.brush] * this.scale };
     this.redraw();
   }
 
@@ -141,7 +155,8 @@ export class Marker {
       events = null;
     }
     if (!events || !events.length) events = [e];
-    for (const ev of events) this.current.points.push(this.toSource(ev));
+    if (this.current.box) this.current.end = this.toSource(events[events.length - 1]);
+    else for (const ev of events) this.current.points.push(this.toSource(ev));
     this.redraw();
   }
 
@@ -150,19 +165,26 @@ export class Marker {
     const m = this.current;
     this.current = null;
     this.rect = null;
-    this.marks.push({ points: m.points, width: m.width });
+    if (m.box) {
+      const b = normBox(m.start, m.end, this.src);
+      if (b.w > 20 * this.scale && b.h > 20 * this.scale) this.box = b; // 小さすぎる四角(タップ)は無視
+    } else {
+      this.marks.push({ points: m.points, width: m.width });
+    }
     this.redraw();
     this.onChange();
   }
 
   undo() {
-    this.marks.pop();
+    if (this.tool === 'box') this.box = null;
+    else this.marks.pop();
     this.redraw();
     this.onChange();
   }
 
   clear() {
     this.marks = [];
+    this.box = null;
     this.redraw();
     this.onChange();
   }
@@ -174,7 +196,19 @@ export class Marker {
     g.setTransform(1, 0, 0, 1, 0, 0);
     g.drawImage(this.src, 0, 0, this.canvas.width, this.canvas.height);
     g.setTransform(k, 0, 0, k, 0, 0);
-    const all = this.current ? [...this.marks, this.current] : this.marks;
+    // 囲んだ範囲(表)
+    const box = this.current && this.current.box ? normBox(this.current.start, this.current.end, this.src) : this.tool === 'box' ? this.box : null;
+    if (box) {
+      g.fillStyle = 'rgba(150, 90, 220, 0.12)';
+      g.fillRect(box.x, box.y, box.w, box.h);
+      g.strokeStyle = '#5b2bb5';
+      g.lineWidth = 3 * this.scale;
+      g.setLineDash([10 * this.scale, 6 * this.scale]);
+      g.strokeRect(box.x, box.y, box.w, box.h);
+      g.setLineDash([]);
+    }
+    if (this.tool === 'box') return;
+    const all = this.current && !this.current.box ? [...this.marks, this.current] : this.marks;
     all.forEach((m, i) => {
       g.strokeStyle = COLOR;
       g.lineWidth = m.width;
@@ -205,6 +239,13 @@ export class Marker {
   crops() {
     return this.marks.map((m) => cropMark(this.src, m));
   }
+}
+
+/** 2 点から、画像の中に収まる四角を作る */
+function normBox(a, b, src) {
+  const x0 = Math.max(0, Math.min(a[0], b[0])), y0 = Math.max(0, Math.min(a[1], b[1]));
+  const x1 = Math.min(src.width, Math.max(a[0], b[0])), y1 = Math.min(src.height, Math.max(a[1], b[1]));
+  return { x: x0, y: y0, w: Math.max(0, x1 - x0), h: Math.max(0, y1 - y0) };
 }
 
 /**

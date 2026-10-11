@@ -37,9 +37,14 @@ function main() {
       const surface = c[0], cost = Number(c[3]), reading = kataToHira(c[11] || '');
       if (!KANJI.test(surface) || !/^[ぁ-ゖー]+$/.test(reading)) continue;
       rows++;
-      if (!best.has(reading)) best.set(reading, new Map());
-      const m = best.get(reading);
-      if (!m.has(surface) || m.get(surface) > cost) m.set(surface, cost);
+      // IPADIC の読みには「預ける → アヅケル」のような表記があるので、「ず・じ」に直した読みでも引けるようにする
+      // (「つづく」のように「づ」が正しい語のため、元の読みも残す)
+      const modern = reading.replace(/づ/g, 'ず').replace(/ぢ/g, 'じ');
+      for (const r of new Set([reading, modern])) {
+        if (!best.has(r)) best.set(r, new Map());
+        const m = best.get(r);
+        if (!m.has(surface) || m.get(surface) > cost) m.set(surface, cost);
+      }
     }
   }
   const buckets = new Map();

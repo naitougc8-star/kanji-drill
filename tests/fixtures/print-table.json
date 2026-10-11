@@ -1,0 +1,72 @@
+{
+ "width": 1500,
+ "height": 760,
+ "table": [
+  63,
+  27,
+  1227,
+  717
+ ],
+ "items": [
+  {
+   "before": "天気",
+   "target": "ヨホウ",
+   "after": "",
+   "answer": "予報"
+  },
+  {
+   "before": "",
+   "target": "ケイザイ",
+   "after": "の話",
+   "answer": "経済"
+  },
+  {
+   "before": "",
+   "target": "ユウビン",
+   "after": "局",
+   "answer": "郵便"
+  },
+  {
+   "before": "",
+   "target": "シゼン",
+   "after": "を守る",
+   "answer": "自然"
+  },
+  {
+   "before": "",
+   "target": "キケン",
+   "after": "な道",
+   "answer": "危険"
+  },
+  {
+   "before": "荷物を",
+   "target": "アズケル",
+   "after": "",
+   "answer": "預ける"
+  },
+  {
+   "before": "",
+   "target": "ドクショ",
+   "after": "感想文",
+   "answer": "読書"
+  },
+  {
+   "before": "地図を",
+   "target": "ヒロゲル",
+   "after": "",
+   "answer": "広げる"
+  },
+  {
+   "before": "",
+   "target": "カンキョウ",
+   "after": "問題",
+   "answer": "環境"
+  },
+  {
+   "before": "列車が",
+   "target": "テイシャ",
+   "after": "する",
+   "answer": "停車"
+  }
+ ]
+}

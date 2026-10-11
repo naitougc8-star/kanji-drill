@@ -46,15 +46,20 @@
         <!-- 問題プリント: 写真の上で問題をなぞって、そこだけを読み取る -->
         <div id="mode-print">
           <p class="hint">
-            写真を選んだら、読み取りたい問題を<strong>1 問ずつ</strong>、指か Apple Pencil でなぞってください
-            (問題の文とふりがなが帯に入るように)。Pencil でなぞっているときは、指でスクロールできます。
+            <strong>表のプリント</strong>(縦書き・番号付きの列・書き取る部分がカタカナ)は、写真を選んだら、問題の並んだ表を
+            指か Apple Pencil で<strong>四角く囲んで</strong>「読み取る」を押してください。罫線から 1 問ずつ自動で切り出します
+            (囲まなければ写真全体を表として読みます)。ほかの形式のプリントは「1 問ずつなぞる」に切り替えて、問題を 1 問ずつなぞってください。
           </p>
           <div id="marker-tools" class="row marker-tools" hidden>
+            <div class="seg" role="radiogroup" aria-label="選び方">
+              <label><input type="radio" name="tool" value="box" checked><span>表を囲む</span></label>
+              <label><input type="radio" name="tool" value="trace"><span>1 問ずつなぞる</span></label>
+            </div>
             <div class="seg" role="radiogroup" aria-label="指の操作" id="finger-mode">
               <label><input type="radio" name="finger" value="draw" checked><span>指でなぞる</span></label>
               <label><input type="radio" name="finger" value="move"><span>指で動かす</span></label>
             </div>
-            <div class="seg" role="radiogroup" aria-label="線の太さ">
+            <div class="seg" role="radiogroup" aria-label="線の太さ" id="brush-seg" hidden>
               <label><input type="radio" name="brush" value="thin"><span>細</span></label>
               <label><input type="radio" name="brush" value="medium" checked><span>中</span></label>
               <label><input type="radio" name="brush" value="thick"><span>太</span></label>
@@ -67,7 +72,7 @@
           </div>
           <div id="marker-box" class="marker-box" hidden><canvas id="marker-canvas" aria-label="写真(読み取りたい問題をなぞる)"></canvas></div>
           <div class="row">
-            <button type="button" id="btn-read-marks" class="btn primary" disabled>なぞった問題を読み取る</button>
+            <button type="button" id="btn-read-marks" class="btn primary" disabled>読み取る</button>
             <span id="mark-status" class="status" aria-live="polite"></span>
           </div>
           <ol id="print-items" class="print-items"></ol>

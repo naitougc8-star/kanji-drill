@@ -6,6 +6,7 @@ import { Pad, drawModel } from './pad.js';
 import { extractWords, segments, hasKanji, newId, loadTokenizer, kataToHira } from './words.js';
 import { loadImage, preprocess, recognize, recognizeCrops } from './ocr.js';
 import { Marker } from './marker.js';
+import { extractTableColumns, fixKatakana, katakanaRuns } from './table.js';
 import { candidates, makeScorer, guessTarget, normalizeReading, lookupBrowser, commonKanji } from './yomi.js';
 import * as storage from './storage.js';
 
@@ -108,8 +109,19 @@ let printItems = [];
 let scorerPromise = null;
 
 function updateMarkStatus() {
-  const n = marker ? marker.marks.length : 0;
-  $('mark-status').textContent = n ? `${n} 問をなぞりました。` : '';
+  if (!marker || !marker.src) {
+    $('btn-read-marks').disabled = true;
+    return;
+  }
+  if (marker.tool === 'box') {
+    $('mark-status').textContent = marker.box
+      ? '表の範囲を囲みました。「読み取る」を押してください。'
+      : '問題の並んだ表を四角く囲んでください(囲まずに読み取ると、写真全体を表として読みます)。';
+    $('btn-read-marks').disabled = false;
+    return;
+  }
+  const n = marker.marks.length;
+  $('mark-status').textContent = n ? `${n} 問をなぞりました。` : '読み取りたい問題を 1 問ずつなぞってください。';
   $('btn-read-marks').disabled = n === 0;
 }
 
@@ -133,14 +145,30 @@ function getCommon() {
 }
 
 async function onReadMarks() {
-  if (!marker || !marker.marks.length) return;
+  if (!marker || !marker.src) return;
+  const table = marker.tool === 'box';
+  if (!table && !marker.marks.length) return;
   hideMessage();
   const btn = $('btn-read-marks');
   btn.disabled = true;
   getScorer(); // 辞書の読み込みを並行して始める
   try {
-    const crops = marker.crops();
-    const lines = await recognizeCrops(crops, { onProgress: (t) => ($('mark-status').textContent = t) });
+    let crops;
+    if (table) {
+      // 表: 罫線から 1 列ずつ切り出す(囲んでいなければ写真全体)
+      $('mark-status').textContent = '表の罫線を探しています…';
+      await new Promise((r) => setTimeout(r, 30)); // 表示を更新してから重い処理をする
+      const rect = marker.box || { x: 0, y: 0, w: marker.src.width, h: marker.src.height };
+      crops = extractTableColumns(marker.src, rect).crops;
+      if (crops.length < 2) {
+        showMessage('表の罫線(縦の線)が見つかりませんでした。表だけを囲み直すか、「1 問ずつなぞる」で読み取ってください。');
+      }
+    } else {
+      crops = marker.crops();
+    }
+    const raw = await recognizeCrops(crops, { onProgress: (t) => ($('mark-status').textContent = t) });
+    // カタカナに混ざった、形の似た字の読み違いを直す(力→カ、工→エ など)
+    const lines = raw.map((l) => fixKatakana(l));
     const items = [];
     for (let i = 0; i < crops.length; i++) {
       const item = {
@@ -148,6 +176,7 @@ async function onReadMarks() {
         text: lines[i],
         crop: crops[i].canvas.toDataURL('image/png'),
         vertical: crops[i].vertical,
+        table, // 表の形式(書き取る部分がカタカナ)
         sel: new Set(),
         answers: new Map(),
         cands: new Map(),
@@ -156,7 +185,7 @@ async function onReadMarks() {
       items.push(item);
     }
     printItems = items;
-    $('mark-status').textContent = `${items.length} 問を読み取りました。書き取る部分(ひらがな)をタップして選び、答えの漢字を確かめてください。`;
+    $('mark-status').textContent = `${items.length} 問を読み取りました。書き取る部分(カタカナ・ひらがな)が選ばれているか、答えの漢字が正しいかを確かめてください。`;
     renderPrintItems();
   } catch (err) {
     $('mark-status').textContent = '';
@@ -168,6 +197,12 @@ async function onReadMarks() {
 
 async function guessSelection(item) {
   item.sel = new Set();
+  // 表の形式(書き取る部分がカタカナ)では、カタカナの並びをすべて選ぶ
+  const runs = item.table ? katakanaRuns(item.text) : [];
+  if (runs.length) {
+    for (const [a, b] of runs) for (let k = a; k < b; k++) item.sel.add(k);
+    return;
+  }
   try {
     const range = await guessTarget(item.text, lookupBrowser);
     if (range) for (let k = range[0]; k < range[1]; k++) item.sel.add(k);
@@ -281,7 +316,7 @@ function renderPrintItems() {
 
     const hint = document.createElement('p');
     hint.className = 'hint';
-    hint.textContent = '書き取る部分(ひらがな)をタップして選んでください。';
+    hint.textContent = '書き取る部分(カタカナ・ひらがな)をタップして選んでください。';
 
     // 選んだ部分ごとの答え
     const answers = document.createElement('div');
@@ -875,6 +910,13 @@ function init() {
   $('btn-rotate').addEventListener('click', () => marker.rotate());
   $('btn-mark-undo').addEventListener('click', () => marker.undo());
   $('btn-mark-clear').addEventListener('click', () => marker.clear());
+  for (const r of document.querySelectorAll('input[name="tool"]')) {
+    r.addEventListener('change', () => {
+      if (!r.checked) return;
+      marker.setTool(r.value);
+      $('brush-seg').hidden = r.value !== 'trace'; // 線の太さは、なぞるときだけ使う
+    });
+  }
   $('btn-read-marks').addEventListener('click', onReadMarks);
   $('btn-add-print').addEventListener('click', onAddPrintWords);
   let resizeTimer = null;
