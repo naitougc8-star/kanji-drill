@@ -1,0 +1,31 @@
+{
+ "width": 1200,
+ "height": 700,
+ "vertical": false,
+ "items": [
+  {
+   "before": "飛行機が",
+   "target": "りりく",
+   "after": "する",
+   "answer": "離陸",
+   "box": [
+    134,
+    108,
+    468,
+    70
+   ]
+  },
+  {
+   "before": "",
+   "target": "ちきゅうぎ",
+   "after": "をまわす",
+   "answer": "地球儀",
+   "box": [
+    134,
+    231,
+    468,
+    70
+   ]
+  }
+ ]
+}

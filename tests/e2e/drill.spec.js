@@ -1,0 +1,290 @@
+import { test, expect } from '@playwright/test';
+
+/** コンソールのエラー・失敗した通信・外部への通信を集める */
+function watch(page, baseURL) {
+  const problems = [];
+  const origin = new URL(baseURL).origin;
+  page.on('console', (m) => {
+    if (m.type() === 'error') problems.push(`console.error: ${m.text()}`);
+  });
+  page.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`));
+  page.on('requestfailed', (r) => problems.push(`requestfailed: ${r.url()} ${r.failure()?.errorText}`));
+  page.on('response', (r) => {
+    if (r.status() >= 400) problems.push(`HTTP ${r.status()}: ${r.url()}`);
+  });
+  page.on('request', (r) => {
+    const u = r.url();
+    if (!u.startsWith(origin) && !u.startsWith('blob:') && !u.startsWith('data:')) problems.push(`external request: ${u}`);
+  });
+  return problems;
+}
+
+/** 取り込み方を「文章(漢字を含む文)」にする(初期値は「問題プリント」) */
+async function useTextMode(page) {
+  await page.locator('label', { hasText: '文章(漢字を含む文)' }).click();
+  await expect(page.locator('#mode-text')).toBeVisible();
+}
+
+/** お手本の筆画(109×109)を、同じオリジンの data/ から取る */
+async function templateOf(page, ch) {
+  return page.evaluate(async (c) => {
+    const cp = c.codePointAt(0);
+    const r = await fetch(`data/k${(cp >> 8).toString(16)}.json`);
+    return (await r.json())[cp.toString(16)];
+  }, ch);
+}
+
+/** マウスで筆画をなぞる(Apple Pencil の代わり) */
+async function drawStrokes(page, cell, strokes) {
+  const canvas = cell.locator('canvas.pad');
+  const box = await canvas.boundingBox();
+  const k = (box.width * 0.86) / 109;
+  const ox = box.x + box.width * 0.07, oy = box.y + box.height * 0.07;
+  for (const flat of strokes) {
+    const pts = [];
+    for (let i = 0; i + 1 < flat.length; i += 2) pts.push([ox + flat[i] * k, oy + flat[i + 1] * k]);
+    await page.mouse.move(pts[0][0], pts[0][1]);
+    await page.mouse.down();
+    for (let i = 1; i < pts.length; i++) await page.mouse.move(pts[i][0], pts[i][1], { steps: 4 });
+    await page.mouse.up();
+  }
+}
+
+async function writeWord(page, { correct }) {
+  const cells = page.locator('#cells .cell');
+  const n = await cells.count();
+  for (let i = 0; i < n; i++) {
+    const cell = cells.nth(i);
+    const ch = await cell.getAttribute('data-char');
+    const t = await templateOf(page, ch);
+    // 間違える場合は、最初の字の最後の筆画を書かない(画数が足りない)
+    const strokes = !correct && i === 0 ? t.slice(0, -1) : t;
+    await drawStrokes(page, cell, strokes);
+  }
+}
+
+test('写真の OCR → 語の取り出し → 出題 → 手書き → 判定 → 間違いの再出題 → 結果', async ({ page, baseURL }) => {
+  const problems = watch(page, baseURL);
+  await page.goto('./');
+  await page.evaluate(() => localStorage.clear());
+  await page.reload();
+  await useTextMode(page);
+  await expect(page.locator('body')).toHaveAttribute('data-ready', '1');
+
+  // 1. 写真から OCR
+  await page.setInputFiles('#photo', 'tests/fixtures/sample.png');
+  await expect(page.locator('#btn-ocr')).toBeEnabled();
+  await expect(page.locator('#ocr-preview')).toBeVisible();
+  await page.click('#btn-ocr');
+  await expect(page.locator('#ocr-status')).toContainText('読み取りました', { timeout: 180_000 });
+  const text = await page.inputValue('#source');
+  console.log('OCR:', JSON.stringify(text));
+  for (const w of ['学校', '漢字', '先生', '手紙']) expect(text).toContain(w);
+
+  // 2. 語の取り出し
+  await page.click('#btn-extract');
+  await expect(page.locator('#extract-status')).toContainText('語を取り出しました', { timeout: 120_000 });
+  const words = await page.locator('#word-list li input.w').evaluateAll((els) => els.map((e) => e.value));
+  console.log('語:', words.join(' '));
+  for (const w of ['学校', '漢字', '先生', '手紙']) expect(words).toContain(w);
+  const reading = await page.locator('#word-list li[data-word="先生"]').locator('input.r').inputValue();
+  expect(reading).toBe('せんせい');
+
+  // 出題するのは「先生」と「手紙」だけにする
+  await page.click('#btn-none');
+  for (const w of ['先生', '手紙']) {
+    await page.locator(`#word-list li[data-word="${w}"]`).locator('.on input').check();
+  }
+  await expect(page.locator('#word-count')).toContainText('出題する語: 2');
+  await expect(page.locator('input[name="level"][value="severe"]')).toBeChecked(); // 初期値はシビア
+  await page.click('#btn-start');
+
+  // 3. 1 回目: 「手紙」は正しく、「先生」は間違えて書く
+  for (let q = 0; q < 2; q++) {
+    await expect(page.locator('#screen-drill')).toBeVisible();
+    const word = await page.locator('#screen-drill').getAttribute('data-word');
+    await expect(page.locator('#reading')).toHaveText(word === '先生' ? 'せんせい' : 'てがみ');
+    await expect(page.locator('#context .blank')).toBeVisible();
+    await writeWord(page, { correct: word === '手紙' });
+    await page.click('#btn-judge');
+    if (word === '手紙') {
+      await expect(page.locator('#verdict-title')).toHaveText('○ 合格');
+    } else {
+      await expect(page.locator('#verdict-title')).toHaveText('× 不合格');
+      await expect(page.locator('#reasons')).toContainText('画数が違います(正解 6 画 / あなた 5 画)');
+      await expect(page.locator('#btn-override')).toBeVisible();
+    }
+    await expect(page.locator('#cells canvas.model')).toHaveCount(2); // お手本を並べて表示
+    await page.click('#btn-next');
+  }
+
+  // 結果画面
+  await expect(page.locator('#screen-result')).toBeVisible();
+  await expect(page.locator('#score')).toHaveText('2 問中 1 問正解');
+  await expect(page.locator('#wrong-list')).toContainText('先生');
+  await expect(page.locator('#history tbody tr')).toHaveCount(1);
+
+  // 4. 間違えた語だけ再出題 → 正しく書く
+  await page.click('#btn-retry');
+  await expect(page.locator('#screen-drill')).toHaveAttribute('data-word', '先生');
+  await expect(page.locator('#progress')).toContainText('2 回目 1 / 1 問');
+  await writeWord(page, { correct: true });
+  await page.click('#btn-judge');
+  await expect(page.locator('#verdict-title')).toHaveText('○ 合格');
+  await page.click('#btn-next');
+
+  await expect(page.locator('#score')).toContainText('全問正解です');
+  await expect(page.locator('#history tbody tr')).toHaveCount(2);
+  await expect(page.locator('#history tbody tr').nth(1)).toContainText('100%');
+  await expect(page.locator('#btn-retry')).toBeHidden();
+
+  expect(problems, problems.join('\n')).toEqual([]);
+});
+
+test('貼り付けだけで使える・手で追加・自己採点・合格にする・書き順・保存', async ({ page, baseURL }) => {
+  const problems = watch(page, baseURL);
+  await page.goto('./');
+  await page.evaluate(() => localStorage.clear());
+  await page.reload();
+  await useTextMode(page);
+  await expect(page.locator('body')).toHaveAttribute('data-ready', '1');
+
+  await page.fill('#source', '山に登る。');
+  await page.click('#btn-extract');
+  await expect(page.locator('#extract-status')).toContainText('語を取り出しました', { timeout: 120_000 });
+  // 送り仮名つきの語(登る → 「登」のマス + 「る」)
+  const words = await page.locator('#word-list li input.w').evaluateAll((els) => els.map((e) => e.value));
+  expect(words).toEqual(['山', '登る']);
+
+  // お手本データがない字(CJK 拡張 A)を手で追加 → 自己採点
+  await page.fill('#add-word', '㐂');
+  await page.fill('#add-reading', 'き');
+  await page.click('#add-form button');
+  await expect(page.locator('#word-list li')).toHaveCount(3);
+
+  // 保存されているか(再読み込みしても残る)
+  await page.reload();
+  await expect(page.locator('#word-list li')).toHaveCount(3);
+  await expect(page.locator('#source')).toHaveValue('山に登る。');
+
+  // 書き順も判定する
+  await page.check('#check-order');
+  await page.locator('#word-list li[data-word="山"]').locator('.on input').uncheck();
+  await page.click('#btn-start');
+
+  for (let q = 0; q < 2; q++) {
+    const word = await page.locator('#screen-drill').getAttribute('data-word');
+    if (word === '登る') {
+      await expect(page.locator('#cells .cell')).toHaveCount(1);
+      await expect(page.locator('#cells .kana')).toHaveText('る');
+      // 書き順を入れ替えて書く(形は合っている)
+      const t = await templateOf(page, '登');
+      const swapped = [t[1], t[0], ...t.slice(2)];
+      await drawStrokes(page, page.locator('#cells .cell').first(), swapped);
+      // 一画戻す → 書き直し
+      await page.click('#btn-undo');
+      await drawStrokes(page, page.locator('#cells .cell').first(), [t[t.length - 1]]);
+      await page.click('#btn-judge');
+      await expect(page.locator('#verdict-title')).toHaveText('× 不合格');
+      await expect(page.locator('#reasons')).toContainText('書き順が違います(形は合っています)');
+      // 手動で合格にする
+      await page.click('#btn-override');
+      await expect(page.locator('#verdict-title')).toHaveText('○ 合格(手動)');
+    } else {
+      expect(word).toBe('㐂');
+      await expect(page.locator('#cells .note')).toHaveText('自己採点');
+      await drawStrokes(page, page.locator('#cells .cell').first(), [[20, 20, 80, 80]]);
+      await page.click('#btn-judge');
+      await expect(page.locator('#selfcheck')).toBeVisible();
+      await expect(page.locator('#btn-next')).toBeDisabled();
+      await page.click('#btn-self-ok');
+      await expect(page.locator('#verdict-title')).toHaveText('○ 合格');
+    }
+    await page.click('#btn-next');
+  }
+  await expect(page.locator('#score')).toContainText('全問正解です');
+  await page.click('#btn-setup');
+  await expect(page.locator('#screen-setup')).toBeVisible();
+
+  expect(problems, problems.join('\n')).toEqual([]);
+});
+
+test('手書きのマス: Retina 対応・touch-action・ボタンの大きさ', async ({ page }) => {
+  await page.goto('./');
+  await page.evaluate(() => localStorage.clear());
+  await page.reload();
+  await useTextMode(page);
+  await page.fill('#source', '日');
+  await page.click('#btn-extract');
+  await expect(page.locator('#extract-status')).toContainText('語を取り出しました', { timeout: 120_000 });
+  await page.click('#btn-start');
+  const info = await page.locator('#cells canvas.pad').evaluate((c) => ({
+    w: c.width,
+    cssW: c.getBoundingClientRect().width,
+    ta: getComputedStyle(c).touchAction,
+    dpr: devicePixelRatio,
+  }));
+  expect(info.w).toBe(Math.round(info.cssW * info.dpr));
+  expect(info.ta).toBe('none');
+  const heights = await page.locator('button:visible, .seg span:visible').evaluateAll((els) => els.map((e) => e.getBoundingClientRect().height));
+  for (const h of heights) expect(h).toBeGreaterThanOrEqual(44);
+
+  // Apple Pencil(pen)を検出したら、以後は指(touch)を無視する
+  const strokes = await page.locator('#cells canvas.pad').evaluate((c) => {
+    const r = c.getBoundingClientRect();
+    const fire = (type, pointerType, id, x, y) =>
+      c.dispatchEvent(new PointerEvent(type, { pointerType, pointerId: id, clientX: r.left + x, clientY: r.top + y, bubbles: true, cancelable: true, isPrimary: true }));
+    // 指で 1 画(Pencil を検出する前なので書ける)
+    fire('pointerdown', 'touch', 11, 20, 20);
+    fire('pointermove', 'touch', 11, 60, 20);
+    fire('pointerup', 'touch', 11, 60, 20);
+    // Pencil で 1 画
+    fire('pointerdown', 'pen', 12, 20, 60);
+    fire('pointermove', 'pen', 12, 80, 60);
+    fire('pointerup', 'pen', 12, 80, 60);
+    // そのあとの指(手のひら)は無視される
+    fire('pointerdown', 'touch', 13, 30, 100);
+    fire('pointermove', 'touch', 13, 90, 100);
+    fire('pointerup', 'touch', 13, 90, 100);
+    return c.width; // 戻り値は使わない
+  });
+  expect(strokes).toBeGreaterThan(0);
+
+  // 点(1 点だけの接触)も 1 画として数える
+  const box = await page.locator('#cells canvas.pad').boundingBox();
+  await page.mouse.click(box.x + 50, box.y + 150);
+  await page.click('#btn-judge');
+  // 指 1 画 + Pencil 1 画 + 点 1 画 = 3 画(手のひらの 1 画は数えない)
+  await expect(page.locator('#reasons')).toContainText('画数が違います(正解 4 画 / あなた 3 画)');
+});
+
+test('通信の失敗は画面にメッセージを出し、手入力で続けられる', async ({ page }) => {
+  await page.goto('./');
+  await page.evaluate(() => localStorage.clear());
+  await page.reload();
+  await useTextMode(page);
+  await expect(page.locator('body')).toHaveAttribute('data-ready', '1');
+
+  // OCR ライブラリが読み込めない
+  await page.route('**/vendor/tesseract/tesseract.min.js', (r) => r.abort());
+  await page.setInputFiles('#photo', 'tests/fixtures/sample.png');
+  await page.click('#btn-ocr');
+  await expect(page.locator('#message')).toBeVisible();
+  await expect(page.locator('#message-text')).toContainText('文字を読み取れませんでした');
+  await expect(page.locator('#message-text')).toContainText('直接入力');
+  await page.click('#message-close');
+
+  // 辞書が読み込めない
+  await page.route('**/vendor/kuromoji/dict/base.dat.gz', (r) => r.abort());
+  await page.fill('#source', '山に登る。');
+  await page.click('#btn-extract');
+  await expect(page.locator('#message-text')).toContainText('語を取り出せませんでした');
+
+  // 手で追加すれば出題できる
+  await page.fill('#add-word', '山');
+  await page.fill('#add-reading', 'やま');
+  await page.click('#add-form button');
+  await expect(page.locator('#btn-start')).toBeEnabled();
+  await page.click('#btn-start');
+  await expect(page.locator('#reading')).toHaveText('やま');
+});

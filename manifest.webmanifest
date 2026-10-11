@@ -1,0 +1,17 @@
+{
+  "name": "漢字書き取りドリル",
+  "short_name": "書き取り",
+  "description": "Apple Pencil で漢字を手書きして、お手本の筆画と照合して判定する書き取りドリル",
+  "lang": "ja",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f6f3ee",
+  "theme_color": "#8f1d14",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

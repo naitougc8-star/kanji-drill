@@ -1,0 +1,46 @@
+{
+ "width": 1400,
+ "height": 1000,
+ "vertical": true,
+ "items": [
+  {
+   "before": "色が",
+   "target": "ちがう",
+   "after": "",
+   "answer": "違う",
+   "bracket": true,
+   "box": [
+    1217,
+    60,
+    59,
+    336
+   ]
+  },
+  {
+   "before": "それはルール",
+   "target": "いはん",
+   "after": "だ",
+   "answer": "違反",
+   "bracket": true,
+   "box": [
+    1045,
+    60,
+    59,
+    576
+   ]
+  },
+  {
+   "before": "友達に",
+   "target": "あやまる",
+   "after": "",
+   "answer": "謝る",
+   "bracket": true,
+   "box": [
+    874,
+    60,
+    59,
+    432
+   ]
+  }
+ ]
+}

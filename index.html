@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>漢字書き取りドリル</title>
+  <meta name="description" content="iPad と Apple Pencil で漢字を手書きして、お手本の筆画と照合して合否を判定する書き取りドリル">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#8f1d14">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="書き取り">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="icon" type="image/png" href="icons/icon-192.png">
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header class="appbar">
+    <h1>漢字書き取りドリル</h1>
+  </header>
+
+  <div id="message" class="message" role="alert" hidden>
+    <p id="message-text"></p>
+    <button type="button" id="message-close" class="btn small" aria-label="メッセージを閉じる">閉じる</button>
+  </div>
+
+  <main>
+    <!-- 設定画面 -->
+    <section id="screen-setup" class="screen">
+      <div class="card">
+        <h2>1. 問題を取り込む</h2>
+        <div class="seg seg-wide" role="radiogroup" aria-label="取り込み方">
+          <label><input type="radio" name="src-mode" value="print" checked><span>問題プリント(なぞって選ぶ)</span></label>
+          <label><input type="radio" name="src-mode" value="text"><span>文章(漢字を含む文)</span></label>
+        </div>
+        <div class="row">
+          <label class="btn file-btn">
+            写真を選ぶ・撮る
+            <input type="file" id="photo" accept="image/*">
+          </label>
+          <span id="photo-status" class="status" aria-live="polite"></span>
+        </div>
+
+        <!-- 問題プリント: 写真の上で問題をなぞって、そこだけを読み取る -->
+        <div id="mode-print">
+          <p class="hint">
+            写真を選んだら、読み取りたい問題を<strong>1 問ずつ</strong>、指か Apple Pencil でなぞってください
+            (問題の文とふりがなが帯に入るように)。Pencil でなぞっているときは、指でスクロールできます。
+          </p>
+          <div id="marker-tools" class="row marker-tools" hidden>
+            <div class="seg" role="radiogroup" aria-label="指の操作" id="finger-mode">
+              <label><input type="radio" name="finger" value="draw" checked><span>指でなぞる</span></label>
+              <label><input type="radio" name="finger" value="move"><span>指で動かす</span></label>
+            </div>
+            <div class="seg" role="radiogroup" aria-label="線の太さ">
+              <label><input type="radio" name="brush" value="thin"><span>細</span></label>
+              <label><input type="radio" name="brush" value="medium" checked><span>中</span></label>
+              <label><input type="radio" name="brush" value="thick"><span>太</span></label>
+            </div>
+            <button type="button" id="btn-zoom-out" class="btn" aria-label="縮小">−</button>
+            <button type="button" id="btn-zoom-in" class="btn" aria-label="拡大">+</button>
+            <button type="button" id="btn-rotate" class="btn">回転</button>
+            <button type="button" id="btn-mark-undo" class="btn">一つ戻す</button>
+            <button type="button" id="btn-mark-clear" class="btn">全部消す</button>
+          </div>
+          <div id="marker-box" class="marker-box" hidden><canvas id="marker-canvas" aria-label="写真(読み取りたい問題をなぞる)"></canvas></div>
+          <div class="row">
+            <button type="button" id="btn-read-marks" class="btn primary" disabled>なぞった問題を読み取る</button>
+            <span id="mark-status" class="status" aria-live="polite"></span>
+          </div>
+          <ol id="print-items" class="print-items"></ol>
+          <div id="print-add-row" class="row" hidden>
+            <button type="button" id="btn-add-print" class="btn primary">選んだ答えを語の一覧に追加</button>
+            <span id="print-add-status" class="status" aria-live="polite"></span>
+          </div>
+        </div>
+
+        <!-- 文章: 漢字を含む文章を読み取って、語を取り出す -->
+        <div id="mode-text" hidden>
+          <div class="row">
+            <div class="seg" role="radiogroup" aria-label="文字の向き">
+              <label><input type="radio" name="dir" value="h" checked><span>横書き</span></label>
+              <label><input type="radio" name="dir" value="v"><span>縦書き</span></label>
+            </div>
+            <button type="button" id="btn-ocr" class="btn" disabled>文字を読み取る</button>
+          </div>
+          <p id="ocr-status" class="status" aria-live="polite"></p>
+          <img id="ocr-preview" class="preview" alt="読み取る画像(前処理後)" hidden>
+          <label for="source" class="label">文章(読み取った結果を直せます。貼り付けだけでも使えます)</label>
+          <textarea id="source" rows="6" placeholder="ここに文章を貼り付けるか、写真から読み取ります"></textarea>
+          <div class="row">
+            <button type="button" id="btn-extract" class="btn primary">語を取り出す</button>
+            <span id="extract-status" class="status" aria-live="polite"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>2. 出題する語</h2>
+        <div class="row">
+          <button type="button" id="btn-all" class="btn">全部選ぶ</button>
+          <button type="button" id="btn-none" class="btn">全部外す</button>
+          <span id="word-count" class="status"></span>
+        </div>
+        <ul id="word-list" class="word-list"></ul>
+        <form id="add-form" class="row add-form">
+          <input id="add-word" placeholder="語(例: 覚える)" aria-label="追加する語" autocomplete="off">
+          <input id="add-reading" placeholder="読み(例: おぼえる)" aria-label="追加する語の読み" autocomplete="off">
+          <button type="submit" class="btn">追加</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>3. 判定の設定</h2>
+        <div class="row">
+          <span class="label-inline">厳しさ</span>
+          <div class="seg" role="radiogroup" aria-label="判定の厳しさ">
+            <label><input type="radio" name="level" value="standard"><span>標準</span></label>
+            <label><input type="radio" name="level" value="severe" checked><span>シビア</span></label>
+            <label><input type="radio" name="level" value="extreme"><span>超シビア</span></label>
+          </div>
+          <label class="check"><input type="checkbox" id="check-order"><span>書き順も判定する</span></label>
+        </div>
+        <button type="button" id="btn-start" class="btn primary big">出題をはじめる</button>
+      </div>
+    </section>
+
+    <!-- 出題画面 -->
+    <section id="screen-drill" class="screen" hidden>
+      <div class="drill-head">
+        <span id="progress" class="progress"></span>
+        <button type="button" id="btn-quit" class="btn small">やめる</button>
+      </div>
+      <div id="reading" class="reading"></div>
+      <div id="context" class="context"></div>
+      <div id="cells" class="cells"></div>
+      <div id="tools" class="row tools">
+        <button type="button" id="btn-undo" class="btn">一画戻す</button>
+        <button type="button" id="btn-clear" class="btn">消す</button>
+        <button type="button" id="btn-clear-all" class="btn">全部消す</button>
+        <button type="button" id="btn-judge" class="btn primary">判定する</button>
+      </div>
+      <div id="verdict" class="verdict" hidden>
+        <p id="verdict-title" class="verdict-title"></p>
+        <ul id="reasons" class="reasons"></ul>
+        <div id="selfcheck" class="row" hidden>
+          <span>お手本データがない字です。正しく書けましたか?</span>
+          <button type="button" id="btn-self-ok" class="btn">書けた</button>
+          <button type="button" id="btn-self-ng" class="btn">書けなかった</button>
+        </div>
+        <div class="row">
+          <button type="button" id="btn-override" class="btn">合格にする</button>
+          <button type="button" id="btn-next" class="btn primary">次へ</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 結果画面 -->
+    <section id="screen-result" class="screen" hidden>
+      <div class="card">
+        <h2>結果</h2>
+        <p id="score" class="score"></p>
+        <div id="wrong-box">
+          <h3>間違えた語</h3>
+          <ul id="wrong-list" class="wrong-list"></ul>
+        </div>
+        <h3>これまでの成績</h3>
+        <table id="history" class="history">
+          <thead><tr><th>回</th><th>問題数</th><th>正解</th><th>正答率</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div class="row">
+          <button type="button" id="btn-retry" class="btn primary">間違えた語だけもう一度</button>
+          <button type="button" id="btn-restart" class="btn">全部をはじめから</button>
+          <button type="button" id="btn-setup" class="btn">設定に戻る</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p>
+      お手本の筆画データ: <a href="https://kanjivg.tagaini.net/" target="_blank" rel="noopener">KanjiVG</a>
+      (© Ulrich Apel、<a href="https://creativecommons.org/licenses/by-sa/3.0/deed.ja" target="_blank" rel="noopener">CC BY-SA 3.0</a>)。
+      本アプリでは筆画を折れ線に簡略化して使っています。
+    </p>
+    <p>
+      文字認識: <a href="https://github.com/naptha/tesseract.js" target="_blank" rel="noopener">Tesseract.js</a>(Apache-2.0)/
+      形態素解析: <a href="https://github.com/takuyaa/kuromoji.js" target="_blank" rel="noopener">kuromoji.js</a>(Apache-2.0、辞書は mecab-ipadic)
+    </p>
+  </footer>
+</body>
+</html>

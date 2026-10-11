@@ -1,0 +1,28 @@
+{
+  "name": "kanji-kakitori-drill",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "iPad + Apple Pencil で漢字を手書きして判定する書き取りドリル(静的サイト)",
+  "scripts": {
+    "serve": "node scripts/serve.mjs",
+    "build:data": "node scripts/build-kanjivg.mjs",
+    "build:vendor": "node scripts/copy-vendor.mjs",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "calibrate": "node scripts/calibrate.mjs"
+  },
+  "dependencies": {
+    "@tesseract.js-data/jpn": "1.0.0",
+    "@tesseract.js-data/jpn_vert": "1.0.0",
+    "kuromoji": "0.1.2",
+    "tesseract.js": "5.1.1",
+    "tesseract.js-core": "5.1.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "joyo-kanji": "0.2.1",
+    "mecab-ipadic-seed": "0.0.2",
+    "vitest": "5.0.3"
+  }
+}
