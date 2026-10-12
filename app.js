@@ -32,7 +32,16 @@ function restore() {
   if (Array.isArray(saved.words)) {
     state.words = saved.words
       .filter((w) => w && typeof w.word === 'string')
-      .map((w) => ({ id: w.id || newId(), word: w.word, reading: w.reading || '', before: w.before || '', after: w.after || '', enabled: w.enabled !== false, manual: !!w.manual }));
+      .map((w) => ({
+        id: w.id || newId(),
+        word: w.word,
+        reading: w.reading || '',
+        before: w.before || '',
+        after: w.after || '',
+        enabled: w.enabled !== false,
+        manual: !!w.manual,
+        result: w.result === 'pass' || w.result === 'fail' ? w.result : null, // 最後に出題したときの結果
+      }));
   }
   if (saved.settings) {
     if (LEVELS[saved.settings.level]) state.settings.level = saved.settings.level;
@@ -457,9 +466,10 @@ function renderWordList() {
   ul.textContent = '';
   for (const w of state.words) {
     const li = document.createElement('li');
-    li.className = w.enabled ? '' : 'off';
+    li.className = [w.enabled ? '' : 'off', w.result ? `res-${w.result}` : ''].join(' ').trim();
     li.dataset.id = w.id;
     li.dataset.word = w.word;
+    li.dataset.result = w.result || 'none';
 
     const on = document.createElement('label');
     on.className = 'on';
@@ -508,13 +518,18 @@ function renderWordList() {
     });
 
     li.append(on, wi, ri, del);
+    // 2 行目: 合格・不合格の印と、文脈
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.appendChild(resultBadge(w.result));
     const ctx = contextHtml(w);
     if (ctx) {
-      const c = document.createElement('div');
+      const c = document.createElement('span');
       c.className = 'ctx';
       c.innerHTML = ctx;
-      li.appendChild(c);
+      meta.appendChild(c);
     }
+    li.appendChild(meta);
     if (!hasKanji(w.word)) {
       const warn = document.createElement('div');
       warn.className = 'warn';
@@ -526,10 +541,41 @@ function renderWordList() {
   updateCount();
 }
 
+const RESULT_LABEL = { pass: '○ 合格', fail: '× 不合格', none: '未出題' };
+
+function resultBadge(result) {
+  const b = document.createElement('span');
+  const key = result || 'none';
+  b.className = `res ${key}`;
+  b.textContent = RESULT_LABEL[key];
+  return b;
+}
+
+/** 出題できる語(チェックが入っていて、漢字を含む) */
+function playable() {
+  return state.words.filter((w) => w.enabled && hasKanji(w.word));
+}
+
 function updateCount() {
-  const n = state.words.filter((w) => w.enabled && hasKanji(w.word)).length;
+  const list = playable();
+  const n = list.length;
+  const wrong = list.filter((w) => w.result === 'fail').length;
   $('word-count').textContent = `出題する語: ${n} / ${state.words.length}`;
   $('btn-start').disabled = n === 0;
+  $('btn-start').textContent = `全問出題する(${n} 語)`;
+  $('btn-start-wrong').disabled = wrong === 0;
+  $('btn-start-wrong').textContent = `不合格の語だけ出題する(${wrong} 語)`;
+  // 合格・不合格・未出題の集計(すべての語)
+  const count = { pass: 0, fail: 0, none: 0 };
+  for (const w of state.words) if (hasKanji(w.word)) count[w.result || 'none']++;
+  const sum = $('result-summary');
+  sum.textContent = '';
+  for (const key of ['pass', 'fail', 'none']) {
+    const b = resultBadge(key === 'none' ? null : key);
+    b.textContent = `${RESULT_LABEL[key]} ${count[key]} 語`;
+    sum.appendChild(b);
+  }
+  $('btn-reset-results').disabled = count.pass + count.fail === 0;
 }
 
 function onAddWord(e) {
@@ -560,11 +606,14 @@ function shuffle(a) {
   return b;
 }
 
-function startSession() {
+/** 出題を始める。onlyWrong なら、前回不合格だった語だけ */
+function startSession(onlyWrong = false) {
   hideMessage();
-  const ids = state.words.filter((w) => w.enabled && hasKanji(w.word)).map((w) => w.id);
+  const ids = playable()
+    .filter((w) => !onlyWrong || w.result === 'fail')
+    .map((w) => w.id);
   if (!ids.length) {
-    showMessage('出題する語がありません。');
+    showMessage(onlyWrong ? '不合格の語はありません。' : '出題する語がありません。');
     return;
   }
   state.session = { history: [], round: 0 };
@@ -807,7 +856,10 @@ function onOverride() {
 
 function onNext() {
   const s = state.session;
-  s.results.push({ id: current.word.id, pass: wordPassed() });
+  const pass = wordPassed();
+  s.results.push({ id: current.word.id, pass });
+  current.word.result = pass ? 'pass' : 'fail'; // 語の一覧の色分けに使う(保存する)
+  persist();
   s.index++;
   if (s.index < s.queue.length) renderQuestion();
   else finishRound();
@@ -826,19 +878,22 @@ function finishRound() {
     s.wrong.length === 0
       ? `全問正解です!(${correct} / ${s.results.length})`
       : `${s.results.length} 問中 ${correct} 問正解`;
-  const ul = $('wrong-list');
+  // この回の全問を、合格は緑・不合格は赤で並べる(不合格を先に)
+  const ul = $('round-list');
   ul.textContent = '';
-  for (const id of s.wrong) {
-    const w = wordById(id);
+  const ordered = [...s.results.filter((r) => !r.pass), ...s.results.filter((r) => r.pass)];
+  for (const r of ordered) {
+    const w = wordById(r.id);
     const li = document.createElement('li');
-    li.textContent = w.word;
+    li.className = r.pass ? 'pass' : 'fail';
+    li.dataset.word = w.word;
+    li.textContent = `${r.pass ? '○' : '×'} ${w.word}`;
     const rd = document.createElement('span');
     rd.className = 'rd';
     rd.textContent = w.reading;
     li.appendChild(rd);
     ul.appendChild(li);
   }
-  $('wrong-box').hidden = s.wrong.length === 0;
   $('btn-retry').hidden = s.wrong.length === 0;
   const tb = $('history').querySelector('tbody');
   tb.textContent = '';
@@ -936,7 +991,14 @@ function init() {
     renderWordList();
   });
   $('add-form').addEventListener('submit', onAddWord);
-  $('btn-start').addEventListener('click', startSession);
+  $('btn-start').addEventListener('click', () => startSession(false));
+  $('btn-start-wrong').addEventListener('click', () => startSession(true));
+  $('btn-reset-results').addEventListener('click', () => {
+    if (!globalThis.confirm('合格・不合格の記録をすべて消しますか?')) return;
+    for (const w of state.words) w.result = null;
+    persist();
+    renderWordList();
+  });
 
   $('btn-undo').addEventListener('click', onUndo);
   $('btn-clear').addEventListener('click', onClear);
@@ -950,11 +1012,12 @@ function init() {
     for (const c of pads) c.pad.destroy();
     pads = [];
     current = null;
+    renderWordList(); // 途中までの合格・不合格を一覧に反映する
     showScreen('setup');
   });
 
   $('btn-retry').addEventListener('click', () => startRound(state.session.wrong));
-  $('btn-restart').addEventListener('click', startSession);
+  $('btn-restart').addEventListener('click', () => startSession(false));
   $('btn-setup').addEventListener('click', () => {
     renderWordList();
     showScreen('setup');

@@ -121,7 +121,9 @@ test('写真の OCR → 語の取り出し → 出題 → 手書き → 判定 �
   // 結果画面
   await expect(page.locator('#screen-result')).toBeVisible();
   await expect(page.locator('#score')).toHaveText('2 問中 1 問正解');
-  await expect(page.locator('#wrong-list')).toContainText('先生');
+  // この回の全問が、合格は緑・不合格は赤で並ぶ
+  await expect(page.locator('#round-list li.fail')).toHaveText(/× 先生/);
+  await expect(page.locator('#round-list li.pass')).toHaveText(/○ 手紙/);
   await expect(page.locator('#history tbody tr')).toHaveCount(1);
 
   // 4. 間違えた語だけ再出題 → 正しく書く
@@ -287,4 +289,74 @@ test('通信の失敗は画面にメッセージを出し、手入力で続け�
   await expect(page.locator('#btn-start')).toBeEnabled();
   await page.click('#btn-start');
   await expect(page.locator('#reading')).toHaveText('やま');
+});
+
+test('合格・不合格の色分けと、不合格の語だけ出題・全問出題', async ({ page, baseURL }) => {
+  const problems = watch(page, baseURL);
+  await page.goto('./');
+  await page.evaluate(() => localStorage.clear());
+  await page.reload();
+  await expect(page.locator('body')).toHaveAttribute('data-ready', '1');
+  for (const [w, r] of [['山', 'やま'], ['川', 'かわ'], ['空', 'そら']]) {
+    await page.fill('#add-word', w);
+    await page.fill('#add-reading', r);
+    await page.click('#add-form button');
+  }
+  // 最初はすべて未出題。不合格がないので「不合格の語だけ」は押せない
+  await expect(page.locator('#word-list li[data-result="none"]')).toHaveCount(3);
+  await expect(page.locator('#btn-start')).toHaveText('全問出題する(3 語)');
+  await expect(page.locator('#btn-start-wrong')).toBeDisabled();
+
+  // 「山」だけ正しく書き、ほかは間違える
+  await page.click('#btn-start');
+  for (let q = 0; q < 3; q++) {
+    const word = await page.locator('#screen-drill').getAttribute('data-word');
+    const t = await templateOf(page, word);
+    await drawStrokes(page, page.locator('#cells .cell').first(), word === '山' ? t : t.slice(0, 1));
+    await page.click('#btn-judge');
+    await page.click('#btn-next');
+  }
+  await expect(page.locator('#round-list li.fail')).toHaveCount(2);
+  await expect(page.locator('#round-list li.pass')).toHaveCount(1);
+  await expect(page.locator('#round-list li').first()).toHaveClass(/fail/); // 不合格が先に並ぶ
+
+  // 設定に戻ると、語の一覧が色分けされている
+  await page.click('#btn-setup');
+  await expect(page.locator('#word-list li[data-word="山"]')).toHaveClass(/res-pass/);
+  await expect(page.locator('#word-list li[data-word="山"] .res')).toHaveText('○ 合格');
+  await expect(page.locator('#word-list li[data-word="川"]')).toHaveClass(/res-fail/);
+  await expect(page.locator('#word-list li[data-word="川"] .res')).toHaveText('× 不合格');
+  await expect(page.locator('#result-summary')).toHaveText(/○ 合格 1 語.*× 不合格 2 語.*未出題 0 語/);
+  await expect(page.locator('#btn-start-wrong')).toHaveText('不合格の語だけ出題する(2 語)');
+
+  // 再読み込みしても色分けは残る
+  await page.reload();
+  await expect(page.locator('#word-list li[data-word="空"]')).toHaveClass(/res-fail/);
+
+  // 不合格の語だけ出題 → 2 問。両方正しく書くと、全部合格になる
+  await page.click('#btn-start-wrong');
+  await expect(page.locator('#progress')).toContainText('1 / 2 問');
+  for (let q = 0; q < 2; q++) {
+    const word = await page.locator('#screen-drill').getAttribute('data-word');
+    expect(['川', '空']).toContain(word);
+    await drawStrokes(page, page.locator('#cells .cell').first(), await templateOf(page, word));
+    await page.click('#btn-judge');
+    await expect(page.locator('#verdict-title')).toHaveText('○ 合格');
+    await page.click('#btn-next');
+  }
+  await page.click('#btn-setup');
+  await expect(page.locator('#word-list li.res-pass')).toHaveCount(3);
+  await expect(page.locator('#btn-start-wrong')).toBeDisabled();
+
+  // 全問出題する → 3 問
+  await page.click('#btn-start');
+  await expect(page.locator('#progress')).toContainText('1 / 3 問');
+  await page.click('#btn-quit');
+
+  // 成績をリセット
+  page.once('dialog', (d) => d.accept());
+  await page.click('#btn-reset-results');
+  await expect(page.locator('#word-list li[data-result="none"]')).toHaveCount(3);
+
+  expect(problems, problems.join('\n')).toEqual([]);
 });
