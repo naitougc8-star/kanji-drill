@@ -10,6 +10,7 @@ import { extractTableColumns, fixKatakana, katakanaRuns } from './table.js';
 import { candidates, makeScorer, guessTarget, normalizeReading, lookupBrowser, commonKanji } from './yomi.js';
 import * as storage from './storage.js';
 import { migrate, wordsOf, photoCount, addWords, groupsOf, createSet, deleteSet } from './sets.js';
+import { makeBackup, backupFileName, parseBackup, mergeBackup, dataSize, formatSize, STORAGE_LIMIT } from './backup.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -25,7 +26,12 @@ const state = {
 // ---------- 保存 ----------
 
 function persist() {
-  storage.save({ text: state.text, words: state.words, sets: state.sets, currentSet: state.currentSet, settings: state.settings });
+  const ok = storage.save({ text: state.text, words: state.words, sets: state.sets, currentSet: state.currentSet, settings: state.settings });
+  if (!ok && !persist.warned) {
+    persist.warned = true;
+    showMessage('この端末に保存できませんでした(保存領域がいっぱいか、プライベートブラウズかもしれません)。「書き出す」でバックアップを取り、古いテストを削除してください。');
+  }
+  if (typeof renderStorage === 'function') renderStorage();
 }
 
 function restore() {
@@ -56,6 +62,7 @@ function restoreSaved() {
         misses: Number.isInteger(w.misses) ? w.misses : w.result === 'fail' ? 1 : 0, // 続けて間違えた回数
         passedAt: Number.isInteger(w.passedAt) ? w.passedAt : null, // 何回目で合格したか
         setId: w.setId, // どのテストか
+        updatedAt: Number(w.updatedAt) || 0, // 最後に変更した時刻(ほかの端末のデータと合わせるときに使う)
         photo: Number.isInteger(w.photo) ? w.photo : w.photo === null ? null : undefined, // テストの中の何枚目の写真か
       }));
   }
@@ -514,7 +521,10 @@ function groupHead(g) {
   cb.indeterminate = !cb.checked && g.words.some((w) => w.enabled);
   cb.setAttribute('aria-label', `${g.label}の語をまとめて出題する`);
   cb.addEventListener('change', () => {
-    for (const w of g.words) w.enabled = cb.checked;
+    for (const w of g.words) {
+      w.enabled = cb.checked;
+      w.updatedAt = Date.now();
+    }
     persist();
     renderWordList();
   });
@@ -555,6 +565,7 @@ function wordRow(w) {
   cb.setAttribute('aria-label', `「${w.word}」を出題する`);
   cb.addEventListener('change', () => {
     w.enabled = cb.checked;
+    w.updatedAt = Date.now();
     li.className = rowClass(w);
     persist();
     updateCount();
@@ -567,6 +578,7 @@ function wordRow(w) {
   wi.setAttribute('aria-label', '語');
   wi.addEventListener('change', () => {
     w.word = wi.value.trim();
+    w.updatedAt = Date.now();
     persist();
     renderWordList();
   });
@@ -578,6 +590,7 @@ function wordRow(w) {
   ri.setAttribute('aria-label', `「${w.word}」の読み`);
   ri.addEventListener('change', () => {
     w.reading = kataToHira(ri.value.trim());
+    w.updatedAt = Date.now();
     ri.value = w.reading;
     persist();
   });
@@ -644,6 +657,7 @@ function resultBadge(w) {
 
 /** 出題の結果を語に記録する(保存される) */
 function recordResult(w, pass) {
+  w.updatedAt = Date.now();
   if (pass) {
     // 合格した回目(続けて間違えた回数 + 1)。合格のまま再び合格したときは、最初に合格した回目を残す
     if (w.result !== 'pass') w.passedAt = (w.misses || 0) + 1;
@@ -692,6 +706,7 @@ function renderSets() {
   $('set-info').textContent = `「${currentSetName()}」: ${n} 語(写真 ${photos} 枚)`;
   $('set-name-inline').textContent = `「${currentSetName()}」`;
   $('btn-set-delete').disabled = false;
+  renderStorage();
 }
 
 function onSetChange() {
@@ -718,6 +733,7 @@ function onSetRename() {
   const name = globalThis.prompt('テストの名前', set.name);
   if (name === null || !name.trim()) return;
   set.name = name.trim();
+  set.updatedAt = Date.now();
   persist();
   renderWordList();
 }
@@ -1103,6 +1119,97 @@ function finishRound() {
   showScreen('result');
 }
 
+// ---------- 4. バックアップ・ほかの端末と共有 ----------
+
+function setBackupStatus(text) {
+  $('backup-status').textContent = text;
+}
+
+/** 保存しているデータの量を表示する(多くなったら知らせる) */
+function renderStorage() {
+  const size = dataSize({ sets: state.sets, words: state.words });
+  const pct = Math.round((size / STORAGE_LIMIT) * 100);
+  const el = $('storage-info');
+  el.textContent =
+    `この端末に保存しているデータ: ${formatSize(size)}(テスト ${state.sets.length} 件・${state.words.length} 語。保存できる量の目安 約 5 MB の ${pct}%)。` +
+    (pct >= 60 ? '多くなってきました。書き出してから、使い終わったテストを削除すると軽くなります。' : '');
+  el.classList.toggle('warn-text', pct >= 60);
+}
+
+/** すべてのテストをファイルに書き出す(iPad / iPhone では共有メニューから AirDrop や「ファイル」に保存できる) */
+async function onExport() {
+  hideMessage();
+  const name = backupFileName();
+  const file = new File([JSON.stringify(makeBackup(state.sets, state.words))], name, { type: 'application/json' });
+  const summary = `テスト ${state.sets.length} 件・${state.words.length} 語`;
+  try {
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: '漢字書き取りドリルのバックアップ' });
+      setBackupStatus(`${name} を書き出しました(${summary})。`);
+      return;
+    }
+  } catch (err) {
+    if (err && err.name === 'AbortError') {
+      setBackupStatus('書き出しをやめました。');
+      return;
+    }
+    // 共有できなかったときは、ファイルとして保存する
+  }
+  const url = URL.createObjectURL(file);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  setBackupStatus(`${name} を保存しました(${summary})。`);
+}
+
+/** バックアップのファイルを読み込む。mode: 'merge'(合わせる)| 'replace'(置き換える) */
+async function onImport(e, mode) {
+  const input = e.target;
+  const file = input.files && input.files[0];
+  input.value = ''; // 同じファイルをもう一度選べるように
+  if (!file) return;
+  hideMessage();
+  try {
+    const inc = parseBackup(await file.text());
+    let message;
+    if (mode === 'replace') {
+      const ok = globalThis.confirm(
+        `この端末のテストと語(テスト ${state.sets.length} 件・${state.words.length} 語)を、` +
+          `ファイルの内容(テスト ${inc.sets.length} 件・${inc.words.length} 語)に置き換えますか? 元に戻せません。`,
+      );
+      if (!ok) return;
+      applyData(inc.sets, inc.words);
+      message = `置き換えました(テスト ${inc.sets.length} 件・${inc.words.length} 語)。`;
+    } else {
+      // はじめて使う端末の、空の「テスト 1」だけなら、ファイルのテストに入れ替える
+      const fresh = state.sets.length === 1 && state.words.length === 0;
+      const base = fresh ? { sets: [], words: [] } : { sets: state.sets, words: state.words };
+      const r = mergeBackup(base, inc);
+      applyData(r.sets, r.words);
+      message = `合わせました: テスト ${r.addedSets} 件と語 ${r.addedWords} 語を追加し、${r.updatedWords} 語を新しい方の成績に更新しました。`;
+    }
+    persist();
+    renderWordList();
+    setBackupStatus(message);
+  } catch (err) {
+    setBackupStatus('');
+    showMessage(`読み込めませんでした(${err.message || err})。`);
+  }
+}
+
+function applyData(sets, words) {
+  const m = migrate({ sets, words, currentSet: state.currentSet });
+  state.sets = m.sets;
+  state.words = m.words;
+  state.currentSet = m.currentSet;
+  printItems = [];
+  renderPrintItems();
+}
+
 // ---------- 初期化 ----------
 
 /** 画面の表示(自動 / ライト / ダーク)を当てる */
@@ -1192,12 +1299,18 @@ function init() {
   });
   $('btn-extract').addEventListener('click', onExtract);
   $('btn-all').addEventListener('click', () => {
-    for (const w of setWords()) w.enabled = true;
+    for (const w of setWords()) {
+      w.enabled = true;
+      w.updatedAt = Date.now();
+    }
     persist();
     renderWordList();
   });
   $('btn-none').addEventListener('click', () => {
-    for (const w of setWords()) w.enabled = false;
+    for (const w of setWords()) {
+      w.enabled = false;
+      w.updatedAt = Date.now();
+    }
     persist();
     renderWordList();
   });
@@ -1206,6 +1319,9 @@ function init() {
   $('btn-set-new').addEventListener('click', onSetNew);
   $('btn-set-rename').addEventListener('click', onSetRename);
   $('btn-set-delete').addEventListener('click', onSetDelete);
+  $('btn-export').addEventListener('click', onExport);
+  $('import-merge').addEventListener('change', (e) => onImport(e, 'merge'));
+  $('import-replace').addEventListener('change', (e) => onImport(e, 'replace'));
   $('btn-start').addEventListener('click', () => startSession('all'));
   $('btn-start-wrong').addEventListener('click', () => startSession('wrong'));
   $('btn-start-new').addEventListener('click', () => startSession('new'));
@@ -1215,6 +1331,7 @@ function init() {
       w.result = null;
       w.misses = 0;
       w.passedAt = null;
+      w.updatedAt = Date.now();
     }
     persist();
     renderWordList();

@@ -229,6 +229,7 @@ textarea { min-height: 140px; resize: vertical; }
 .set-card { border: 2px solid var(--accent); }
 .set-select { min-height: 48px; font: inherit; font-size: 18px; font-weight: 700; padding: 6px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--text); flex: 1 1 220px; max-width: 100%; }
 .set-name { color: var(--accent); font-size: 16px; }
+.warn-text { color: var(--ng); font-weight: 700; }
 .word-list li {
   display: grid;
   grid-template-columns: 48px minmax(90px, 1fr) minmax(110px, 1.3fr) 48px;

@@ -61,6 +61,7 @@ export function addWords(words, setId, entries, kind = 'photo') {
       passedAt: null,
       setId,
       photo,
+      updatedAt: Date.now(), // ほかの端末のデータと合わせるときに、新しい方を残すため
     });
     added++;
   }
@@ -88,7 +89,7 @@ export function groupsOf(words, setId) {
 
 /** 新しいテストを作る */
 export function createSet(sets, name) {
-  const set = { id: newId(), name: (name || '').trim() || `テスト ${sets.length + 1}` };
+  const set = { id: newId(), name: (name || '').trim() || `テスト ${sets.length + 1}`, updatedAt: Date.now() };
   sets.push(set);
   return set;
 }

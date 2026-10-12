@@ -517,3 +517,91 @@ test('テスト(出題の範囲)ごとに語をまとめる: 作る・名前を�
 
   expect(problems, problems.join('\n')).toEqual([]);
 });
+
+test('バックアップ: iPad で書き出したファイルを iPhone で読み込んで合わせ、両方の成績をまとめる', async ({ browser, baseURL }, testInfo) => {
+  // 2 台の端末の代わりに、保存領域が別々の 2 つのブラウザを使う
+  const open = async () => {
+    const ctx = await browser.newContext({ baseURL, viewport: { width: 820, height: 1180 } });
+    // 共有メニュー(navigator.share)の代わりに、ファイルとして保存する経路を通す
+    await ctx.addInitScript(() => Object.defineProperty(navigator, 'canShare', { value: undefined }));
+    const page = await ctx.newPage();
+    const problems = watch(page, baseURL);
+    await page.goto('./');
+    await expect(page.locator('body')).toHaveAttribute('data-ready', '1');
+    return { ctx, page, problems };
+  };
+  const exportFile = async (page, name) => {
+    const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#btn-export')]);
+    expect(dl.suggestedFilename()).toMatch(/^kanji-drill-\d{8}-\d{4}\.json$/);
+    const file = testInfo.outputPath(name);
+    await dl.saveAs(file);
+    await expect(page.locator('#backup-status')).toContainText('を保存しました');
+    return file;
+  };
+  const answer = async (page, correct) => {
+    const word = await page.locator('#screen-drill').getAttribute('data-word');
+    const t = await templateOf(page, word);
+    await drawStrokes(page, page.locator('#cells .cell').first(), correct ? t : t.slice(0, 1));
+    await page.click('#btn-judge');
+    await page.click('#btn-next');
+  };
+
+  // iPad: 「中間テスト」に 山・川 を入れて、山を合格にする
+  const ipad = await open();
+  {
+    const p = ipad.page;
+    p.once('dialog', (d) => d.accept('中間テスト'));
+    await p.click('#btn-set-rename');
+    for (const [w, r] of [['山', 'やま'], ['川', 'かわ']]) {
+      await p.fill('#add-word', w);
+      await p.fill('#add-reading', r);
+      await p.click('#add-form button');
+    }
+    await p.locator('#word-list li[data-word="川"] .on input').uncheck();
+    await p.click('#btn-start');
+    await answer(p, true);
+    await p.click('#btn-setup');
+    await p.locator('#word-list li[data-word="川"] .on input').check();
+    await expect(p.locator('#word-list li[data-word="山"] .res')).toHaveText('○ 1 回目で合格');
+    await expect(p.locator('#storage-info')).toContainText('この端末に保存しているデータ');
+  }
+  const fromIpad = await exportFile(ipad.page, 'ipad.json');
+
+  // iPhone(はじめて使う): 読み込んで合わせる → 中間テストと成績がそのまま入る(空の「テスト 1」は残らない)
+  const iphone = await open();
+  await iphone.page.setInputFiles('#import-merge', fromIpad);
+  await expect(iphone.page.locator('#backup-status')).toContainText('テスト 1 件と語 2 語を追加し');
+  await expect(iphone.page.locator('#set-select option')).toHaveText(['中間テスト(2 語)']);
+  await expect(iphone.page.locator('#word-list li[data-word="山"] .res')).toHaveText('○ 1 回目で合格');
+
+  // iPhone で 川 を間違える → 書き出す
+  await iphone.page.click('#btn-start-new');
+  await answer(iphone.page, false);
+  await expect(iphone.page.locator('#round-list li.fail1')).toHaveCount(1);
+  await iphone.page.click('#btn-setup');
+  const fromIphone = await exportFile(iphone.page, 'iphone.json');
+
+  // iPad で合わせる → 川 が iPhone の成績(1 回まちがい)になる。山の成績は残る
+  await ipad.page.setInputFiles('#import-merge', fromIphone);
+  await expect(ipad.page.locator('#backup-status')).toContainText('1 語を新しい方の成績に更新しました');
+  await expect(ipad.page.locator('#word-list li[data-word="川"] .res')).toHaveText('× 1 回まちがい');
+  await expect(ipad.page.locator('#word-list li[data-word="山"] .res')).toHaveText('○ 1 回目で合格');
+  await expect(ipad.page.locator('#set-select option')).toHaveText(['中間テスト(2 語)']); // 同じテストは 1 つにまとまる
+
+  // 置き換える(確認あり)
+  ipad.page.once('dialog', (d) => d.accept());
+  await ipad.page.setInputFiles('#import-replace', fromIpad);
+  await expect(ipad.page.locator('#backup-status')).toContainText('置き換えました');
+  await expect(ipad.page.locator('#word-list li[data-word="川"] .res')).toHaveText('未出題');
+
+  // ほかのファイルは断る
+  const bad = testInfo.outputPath('bad.json');
+  (await import('node:fs')).writeFileSync(bad, '{"hello":1}');
+  await ipad.page.setInputFiles('#import-merge', bad);
+  await expect(ipad.page.locator('#message-text')).toContainText('このアプリのバックアップファイルではありません');
+
+  expect(ipad.problems, ipad.problems.join('\n')).toEqual([]);
+  expect(iphone.problems, iphone.problems.join('\n')).toEqual([]);
+  await ipad.ctx.close();
+  await iphone.ctx.close();
+});

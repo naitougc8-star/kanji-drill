@@ -166,6 +166,25 @@
           <button type="button" id="btn-start-new" class="btn big btn-new">未出題の語だけ出題する</button>
         </div>
       </div>
+      <div class="card">
+        <h2>4. バックアップ・ほかの端末と共有</h2>
+        <p class="hint">
+          語と成績は、この端末のブラウザの中だけに保存されています(写真は保存しません)。
+          「書き出す」でファイルにしておくと、データが消えたときに戻せます。iPad と iPhone で同じテストを使うときは、
+          片方で書き出したファイルを <strong>AirDrop</strong> で送るか <strong>「ファイル」アプリの iCloud Drive</strong> に保存し、もう片方で「読み込んで合わせる」を押してください。
+        </p>
+        <div class="row">
+          <button type="button" id="btn-export" class="btn primary">書き出す(すべてのテスト)</button>
+          <label class="btn file-btn">読み込んで合わせる<input type="file" id="import-merge" accept=".json,application/json"></label>
+          <label class="btn file-btn">読み込んで置き換える<input type="file" id="import-replace" accept=".json,application/json"></label>
+        </div>
+        <p class="hint">
+          「合わせる」: 両方の端末のテストと語をまとめます。同じ語は、新しく出題・変更した方の成績を残します(片方で削除した語は残ります)。<br>
+          「置き換える」: この端末のテストと語を、ファイルの内容に入れ替えます。
+        </p>
+        <p id="backup-status" class="status" aria-live="polite"></p>
+        <p id="storage-info" class="status"></p>
+      </div>
     </section>
 
     <!-- 出題画面 -->
