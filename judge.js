@@ -5,6 +5,8 @@
 
 /** 厳しさごとのしきい値。数値の根拠は README の「判定のしきい値」を参照。 */
 export const LEVELS = {
+  // 甘い: 字の形のゆれ(位置・長さ・角度)は大きく許し、似た字を見分けるチェック(長さの関係・字ごとのルール)は標準と同じくらいに残す
+  lenient: { label: '甘い', mean: 0.2, max: 0.42, end: 0.26, lenLo: 0.5, lenHi: 2.0, lenAbs: 0.26, angle: 38, aspect: 0.65, relLen: 0.5, maxRot: 25, maxScale: 1.7, rule: 1.2, group: 0.5 },
   standard: { label: '標準', mean: 0.15, max: 0.32, end: 0.21, lenLo: 0.58, lenHi: 1.7, lenAbs: 0.2, angle: 30, aspect: 0.55, relLen: 0.5, maxRot: 20, maxScale: 1.5, rule: 1.3, group: 0.5 },
   severe: { label: 'シビア', mean: 0.11, max: 0.25, end: 0.16, lenLo: 0.68, lenHi: 1.48, lenAbs: 0.15, angle: 22, aspect: 0.42, relLen: 0.35, maxRot: 15, maxScale: 1.4, rule: 1.0, group: 0.32 },
   extreme: { label: '超シビア', mean: 0.085, max: 0.19, end: 0.125, lenLo: 0.76, lenHi: 1.32, lenAbs: 0.12, angle: 15, aspect: 0.32, relLen: 0.28, maxRot: 12, maxScale: 1.3, rule: 0.8, group: 0.25 },
@@ -35,6 +37,9 @@ export const CHAR_RULES = {
   // 日・曰: 縦横比だけが大きく違う(対数で約 0.4)。全体の許容差(シビアで log 1.42 = 0.35)では分けられない。
   日: [{ type: 'aspect', tol: 0.2 }],
   曰: [{ type: 'aspect', tol: 0.2 }],
+  // 午・牛: 4 画目(縦画)が 2 画目の横画より上に突き出るかどうか
+  午: [{ type: 'dy', p: [3, 'start'], a: [1, 'mid'], tol: 0.12, what: '書き始めの高さ' }],
+  牛: [{ type: 'dy', p: [3, 'start'], a: [1, 'mid'], tol: 0.12, what: '書き始めの高さ' }],
   // 刀・力: 2 画目(ノ)が 1 画目の横画より上から出るかどうか
   刀: [{ type: 'dy', p: [1, 'start'], a: [0, 'start'], tol: 0.12, what: '書き始めの高さ' }],
   力: [{ type: 'dy', p: [1, 'start'], a: [0, 'start'], tol: 0.12, what: '書き始めの高さ' }],

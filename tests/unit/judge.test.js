@@ -136,6 +136,16 @@ describe('模擬の手書きによる検証', () => {
     }
   });
 
+  it('甘い: 「雑」の誤差でも 85% 以上が合格し、紛らわしいペアの誤合格は 20% 以下(標準と同じくらい)', () => {
+    const lenient = passRate(chars, 'lenient', NOISE.rough, 8, 2);
+    console.log(`甘い/雑 合格率 ${(lenient * 100).toFixed(1)}%`);
+    expect(lenient).toBeGreaterThanOrEqual(0.85);
+    expect(lenient).toBeGreaterThan(passRate(chars, 'standard', NOISE.rough, 8, 2));
+    for (const [a, b] of CONFUSABLE_SAME) {
+      for (const [x, y] of [[a, b], [b, a]]) expect(falsePass(x, y, 'lenient', 200, 7), `${x}→${y}`).toBeLessThanOrEqual(0.2);
+    }
+  });
+
   it('紛らわしいペア(画数が同じ): シビアで誤合格 5% 以下、超シビアはさらに低い', () => {
     const rows = [];
     let sumSevere = 0, sumExtreme = 0;

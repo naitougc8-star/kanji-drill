@@ -57,7 +57,7 @@ out.push('字ごとのルールがある字の、正しく書いたときの合�
 out.push('');
 out.push(`| 字 | ${levels.map((l) => LEVELS[l].label).join(' | ')} |`);
 out.push(`|---|${levels.map(() => '---:').join('|')}|`);
-for (const ch of ['日', '曰', '刀', '力', '己', '已', '巳', '末', '未', '士', '土']) {
+for (const ch of ['日', '曰', '午', '牛', '刀', '力', '己', '已', '巳', '末', '未', '士', '土']) {
   out.push(`| ${ch} | ${levels.map((l) => pct(passRate([ch], l, NOISE.normal, 200, 5))).join(' | ')} |`);
 }
 console.log(out.join('\n'));
