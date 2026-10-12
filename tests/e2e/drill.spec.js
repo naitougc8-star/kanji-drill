@@ -445,3 +445,75 @@ test('未出題の語だけ出題する・判定の厳しさ 4 段階・画面�
 
   expect(problems, problems.join('\n')).toEqual([]);
 });
+
+test('テスト(出題の範囲)ごとに語をまとめる: 作る・名前を変える・切り替える・写真ごとのまとまり・削除・以前のデータ', async ({ page, baseURL }) => {
+  const problems = watch(page, baseURL);
+  // 以前の形式のデータ(テストなし)は「テスト 1」の「以前に取り込んだ語」になる
+  await page.goto('./');
+  await page.evaluate(() => {
+    localStorage.clear();
+    localStorage.setItem('kakitori-drill.v1', JSON.stringify({ words: [{ id: 'old1', word: '海', reading: 'うみ', enabled: true, result: 'pass', passedAt: 2 }] }));
+  });
+  await page.reload();
+  await expect(page.locator('body')).toHaveAttribute('data-ready', '1');
+  await expect(page.locator('#set-select option')).toHaveText(['テスト 1(1 語)']);
+  await expect(page.locator('.group-head .gname')).toHaveText(['以前に取り込んだ語']);
+  await expect(page.locator('#word-list li[data-word="海"] .res')).toHaveText('○ 2 回目で合格');
+
+  // 名前を変える
+  page.once('dialog', (d) => d.accept('1 学期 中間テスト'));
+  await page.click('#btn-set-rename');
+  await expect(page.locator('#set-select option')).toHaveText(['1 学期 中間テスト(1 語)']);
+  await expect(page.locator('#set-name-inline')).toHaveText('「1 学期 中間テスト」');
+
+  // 文章から取り込むと「写真 1」、手で追加すると「手で追加した語」
+  await useTextMode(page);
+  await page.fill('#source', '山に登る。');
+  await page.click('#btn-extract');
+  await expect(page.locator('#extract-status')).toContainText('「1 学期 中間テスト」に 2 語を追加しました', { timeout: 120_000 });
+  await page.fill('#add-word', '川');
+  await page.fill('#add-reading', 'かわ');
+  await page.click('#add-form button');
+  await expect(page.locator('.group-head .gname')).toHaveText(['以前に取り込んだ語', '写真 1', '手で追加した語']);
+  await expect(page.locator('#set-info')).toContainText('4 語(写真 1 枚)');
+
+  // 新しいテストを作ると、そちらに切り替わり、語の一覧は空
+  page.once('dialog', (d) => d.accept('1 学期 期末テスト'));
+  await page.click('#btn-set-new');
+  await expect(page.locator('#set-select')).toHaveValue(/.+/);
+  await expect(page.locator('#set-select option:checked')).toHaveText('1 学期 期末テスト(0 語)');
+  await expect(page.locator('#word-list li')).toHaveCount(0);
+  await expect(page.locator('#btn-start')).toBeDisabled();
+  await page.fill('#add-word', '空');
+  await page.fill('#add-reading', 'そら');
+  await page.click('#add-form button');
+  // 出題は、選んでいるテストの中からだけ
+  await page.click('#btn-start');
+  await expect(page.locator('#progress')).toContainText('「1 学期 期末テスト」');
+  await expect(page.locator('#progress')).toContainText('1 / 1 問');
+  await expect(page.locator('#screen-drill')).toHaveAttribute('data-word', '空');
+  await page.click('#btn-quit');
+
+  // 中間テストに戻すと、中間テストの語だけ
+  await page.locator('#set-select').selectOption({ label: '1 学期 中間テスト(4 語)' });
+  expect(await page.locator('#word-list li input.w').evaluateAll((els) => els.map((e) => e.value))).toEqual(['海', '山', '登る', '川']);
+  await expect(page.locator('#btn-start')).toHaveText('全問出題する(4 語)');
+  // 写真のまとまりごとに、出題する・しないを切り替える
+  await page.locator('.group-head[data-group="1"] input[type="checkbox"]').uncheck();
+  await expect(page.locator('#btn-start')).toHaveText('全問出題する(2 語)');
+
+  // 再読み込みしても、選んでいるテストと語は残る
+  await page.reload();
+  await expect(page.locator('#set-select option:checked')).toHaveText('1 学期 中間テスト(4 語)');
+  await expect(page.locator('#btn-start')).toHaveText('全問出題する(2 語)');
+
+  // 期末テストを削除すると、その語も消える
+  await page.locator('#set-select').selectOption({ label: '1 学期 期末テスト(1 語)' });
+  page.once('dialog', (d) => d.accept());
+  await page.click('#btn-set-delete');
+  await expect(page.locator('#set-select option')).toHaveText(['1 学期 中間テスト(4 語)']);
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('kakitori-drill.v1')).words.map((w) => w.word));
+  expect(stored).not.toContain('空');
+
+  expect(problems, problems.join('\n')).toEqual([]);
+});

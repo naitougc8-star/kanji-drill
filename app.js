@@ -9,12 +9,15 @@ import { Marker } from './marker.js';
 import { extractTableColumns, fixKatakana, katakanaRuns } from './table.js';
 import { candidates, makeScorer, guessTarget, normalizeReading, lookupBrowser, commonKanji } from './yomi.js';
 import * as storage from './storage.js';
+import { migrate, wordsOf, photoCount, addWords, groupsOf, createSet, deleteSet } from './sets.js';
 
 const $ = (id) => document.getElementById(id);
 
 const state = {
   text: '',
   words: [],
+  sets: [], // テスト(出題の範囲)
+  currentSet: null, // 選んでいるテスト
   settings: { level: DEFAULT_LEVEL, checkOrder: false, vertical: false, srcMode: 'print', theme: 'auto' },
   session: null,
 };
@@ -22,10 +25,19 @@ const state = {
 // ---------- 保存 ----------
 
 function persist() {
-  storage.save({ text: state.text, words: state.words, settings: state.settings });
+  storage.save({ text: state.text, words: state.words, sets: state.sets, currentSet: state.currentSet, settings: state.settings });
 }
 
 function restore() {
+  restoreSaved();
+  // テストがなければ「テスト 1」を作り、これまでの語をすべて入れる
+  const m = migrate({ sets: state.sets, words: state.words, currentSet: state.currentSet });
+  state.sets = m.sets;
+  state.words = m.words;
+  state.currentSet = m.currentSet;
+}
+
+function restoreSaved() {
   const saved = storage.load();
   if (!saved) return;
   if (typeof saved.text === 'string') state.text = saved.text;
@@ -43,8 +55,12 @@ function restore() {
         result: w.result === 'pass' || w.result === 'fail' ? w.result : null, // 最後に出題したときの結果
         misses: Number.isInteger(w.misses) ? w.misses : w.result === 'fail' ? 1 : 0, // 続けて間違えた回数
         passedAt: Number.isInteger(w.passedAt) ? w.passedAt : null, // 何回目で合格したか
+        setId: w.setId, // どのテストか
+        photo: Number.isInteger(w.photo) ? w.photo : w.photo === null ? null : undefined, // テストの中の何枚目の写真か
       }));
   }
+  if (Array.isArray(saved.sets)) state.sets = saved.sets;
+  if (typeof saved.currentSet === 'string') state.currentSet = saved.currentSet;
   if (saved.settings) {
     if (LEVELS[saved.settings.level]) state.settings.level = saved.settings.level;
     else if (saved.settings.level === 'extreme') state.settings.level = 'severe'; // 超シビアはなくなったので、シビアにする
@@ -391,19 +407,19 @@ function renderPrintItems() {
 }
 
 function onAddPrintWords() {
-  let added = 0;
+  const entries = [];
   for (const item of printItems) {
     for (const run of runsOf(item)) {
       const word = (item.answers.get(run.key) || '').trim();
       if (!run.reading || !hasKanji(word)) continue;
-      if (state.words.some((w) => w.word === word && w.reading === run.reading)) continue;
-      state.words.push({ id: newId(), word, reading: run.reading, before: run.before, after: run.after, enabled: true, manual: true });
-      added++;
+      entries.push({ word, reading: run.reading, before: run.before, after: run.after });
     }
   }
+  // 写真 1 枚分として、選んでいるテストに入れる
+  const added = entries.length ? addWords(state.words, state.currentSet, entries, 'photo') : 0;
   persist();
   renderWordList();
-  $('print-add-status').textContent = added ? `${added} 語を語の一覧に追加しました。` : '追加できる答えがありません(書き取る部分を選び、答えの漢字を確かめてください)。';
+  $('print-add-status').textContent = added ? `${added} 語を語の一覧に追加しました(「${currentSetName()}」)。` : '追加できる答えがありません(書き取る部分を選び、答えの漢字を確かめてください)。';
 }
 
 async function onOcr() {
@@ -446,11 +462,10 @@ async function onExtract() {
     const tokenizer = await loadTokenizer();
     $('extract-status').textContent = '解析しています…';
     const words = extractWords(text, tokenizer.tokenize(text));
-    const manual = state.words.filter((w) => w.manual && !words.some((x) => x.word === w.word));
-    state.words = [...words, ...manual];
+    const added = addWords(state.words, state.currentSet, words, 'photo');
     persist();
     renderWordList();
-    $('extract-status').textContent = `${words.length} 語を取り出しました。`;
+    $('extract-status').textContent = `${words.length} 語を取り出しました。${addedText(added)}`;
   } catch (err) {
     $('extract-status').textContent = '';
     showMessage(`語を取り出せませんでした(${err.message || err})。下の欄から語を手で追加することもできます。`);
@@ -465,84 +480,139 @@ function contextHtml(w) {
   return `${esc(w.before)}<mark>${esc(w.word)}</mark>${esc(w.after)}`;
 }
 
+/** 選んでいるテストの語を、写真ごとのまとまりに分けて表示する */
 function renderWordList() {
-  const ul = $('word-list');
-  ul.textContent = '';
-  for (const w of state.words) {
-    const li = document.createElement('li');
-    li.className = [w.enabled ? '' : 'off', `res-${statusOf(w)}`].join(' ').trim();
-    li.dataset.id = w.id;
-    li.dataset.word = w.word;
-    li.dataset.result = statusOf(w);
-
-    const on = document.createElement('label');
-    on.className = 'on';
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.checked = w.enabled;
-    cb.setAttribute('aria-label', `「${w.word}」を出題する`);
-    cb.addEventListener('change', () => {
-      w.enabled = cb.checked;
-      li.className = w.enabled ? '' : 'off';
-      persist();
-      updateCount();
-    });
-    on.appendChild(cb);
-
-    const wi = document.createElement('input');
-    wi.className = 'w';
-    wi.value = w.word;
-    wi.setAttribute('aria-label', '語');
-    wi.addEventListener('change', () => {
-      w.word = wi.value.trim();
-      persist();
-      renderWordList();
-    });
-
-    const ri = document.createElement('input');
-    ri.className = 'r';
-    ri.value = w.reading;
-    ri.placeholder = '読みを入力';
-    ri.setAttribute('aria-label', `「${w.word}」の読み`);
-    ri.addEventListener('change', () => {
-      w.reading = kataToHira(ri.value.trim());
-      ri.value = w.reading;
-      persist();
-    });
-
-    const del = document.createElement('button');
-    del.type = 'button';
-    del.className = 'btn del';
-    del.textContent = '×';
-    del.setAttribute('aria-label', `「${w.word}」を一覧から消す`);
-    del.addEventListener('click', () => {
-      state.words = state.words.filter((x) => x !== w);
-      persist();
-      renderWordList();
-    });
-
-    li.append(on, wi, ri, del);
-    // 2 行目: 合格・不合格の印と、文脈
-    const meta = document.createElement('div');
-    meta.className = 'meta';
-    meta.appendChild(resultBadge(w));
-    const ctx = contextHtml(w);
-    if (ctx) {
-      const c = document.createElement('span');
-      c.className = 'ctx';
-      c.innerHTML = ctx;
-      meta.appendChild(c);
-    }
-    li.appendChild(meta);
-    if (!hasKanji(w.word)) {
-      const warn = document.createElement('div');
-      warn.className = 'warn';
-      warn.textContent = '漢字を含まないので出題しません';
-      li.appendChild(warn);
-    }
-    ul.appendChild(li);
+  renderSets();
+  const box = $('word-list');
+  box.textContent = '';
+  for (const g of groupsOf(state.words, state.currentSet)) {
+    box.append(groupHead(g));
+    const ul = document.createElement('ul');
+    ul.dataset.group = g.key;
+    for (const w of g.words) ul.appendChild(wordRow(w));
+    box.appendChild(ul);
   }
   updateCount();
+}
+
+/** 写真ごとのまとまりの見出し(まとめて出題する・しない、まとめて削除) */
+function groupHead(g) {
+  const head = document.createElement('div');
+  head.className = 'group-head';
+  head.dataset.group = g.key;
+  const name = document.createElement('span');
+  name.className = 'gname';
+  name.textContent = g.label;
+  const count = document.createElement('span');
+  count.className = 'gcount';
+  count.textContent = `${g.words.length} 語`;
+  const on = document.createElement('label');
+  on.className = 'check';
+  const cb = document.createElement('input');
+  cb.type = 'checkbox';
+  cb.checked = g.words.every((w) => w.enabled);
+  cb.indeterminate = !cb.checked && g.words.some((w) => w.enabled);
+  cb.setAttribute('aria-label', `${g.label}の語をまとめて出題する`);
+  cb.addEventListener('change', () => {
+    for (const w of g.words) w.enabled = cb.checked;
+    persist();
+    renderWordList();
+  });
+  const t = document.createElement('span');
+  t.textContent = '出題する';
+  on.append(cb, t);
+  const del = document.createElement('button');
+  del.type = 'button';
+  del.className = 'btn small';
+  del.textContent = 'まとめて削除';
+  del.addEventListener('click', () => {
+    if (!globalThis.confirm(`${g.label}の ${g.words.length} 語を、このテストから削除しますか?`)) return;
+    const ids = new Set(g.words.map((w) => w.id));
+    state.words = state.words.filter((w) => !ids.has(w.id));
+    persist();
+    renderWordList();
+  });
+  head.append(name, count, on, del);
+  return head;
+}
+
+function rowClass(w) {
+  return [w.enabled ? '' : 'off', `res-${statusOf(w)}`].join(' ').trim();
+}
+
+function wordRow(w) {
+  const li = document.createElement('li');
+  li.className = rowClass(w);
+  li.dataset.id = w.id;
+  li.dataset.word = w.word;
+  li.dataset.result = statusOf(w);
+
+  const on = document.createElement('label');
+  on.className = 'on';
+  const cb = document.createElement('input');
+  cb.type = 'checkbox';
+  cb.checked = w.enabled;
+  cb.setAttribute('aria-label', `「${w.word}」を出題する`);
+  cb.addEventListener('change', () => {
+    w.enabled = cb.checked;
+    li.className = rowClass(w);
+    persist();
+    updateCount();
+  });
+  on.appendChild(cb);
+
+  const wi = document.createElement('input');
+  wi.className = 'w';
+  wi.value = w.word;
+  wi.setAttribute('aria-label', '語');
+  wi.addEventListener('change', () => {
+    w.word = wi.value.trim();
+    persist();
+    renderWordList();
+  });
+
+  const ri = document.createElement('input');
+  ri.className = 'r';
+  ri.value = w.reading;
+  ri.placeholder = '読みを入力';
+  ri.setAttribute('aria-label', `「${w.word}」の読み`);
+  ri.addEventListener('change', () => {
+    w.reading = kataToHira(ri.value.trim());
+    ri.value = w.reading;
+    persist();
+  });
+
+  const del = document.createElement('button');
+  del.type = 'button';
+  del.className = 'btn del';
+  del.textContent = '×';
+  del.setAttribute('aria-label', `「${w.word}」を一覧から消す`);
+  del.addEventListener('click', () => {
+    state.words = state.words.filter((x) => x !== w);
+    persist();
+    renderWordList();
+  });
+
+  li.append(on, wi, ri, del);
+  // 2 行目: 合格・不合格の印と、文脈
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  meta.appendChild(resultBadge(w));
+  const ctx = contextHtml(w);
+  if (ctx) {
+    const c = document.createElement('span');
+    c.className = 'ctx';
+    c.innerHTML = ctx;
+    meta.appendChild(c);
+  }
+  li.appendChild(meta);
+  if (!hasKanji(w.word)) {
+    const warn = document.createElement('div');
+    warn.className = 'warn';
+    warn.textContent = '漢字を含まないので出題しません';
+    li.appendChild(warn);
+  }
+  return li;
 }
 
 // 色分けの区分: 合格(緑)・1 回まちがい(黄)・2 回まちがい(オレンジ)・3 回以上まちがい(赤)・未出題(灰)
@@ -586,15 +656,90 @@ function recordResult(w, pass) {
 }
 
 /** 出題できる語(チェックが入っていて、漢字を含む) */
+/** 選んでいるテストの語 */
+function setWords() {
+  return wordsOf(state.words, state.currentSet);
+}
+
+/** 出題できる語(選んでいるテストの中で、チェックが入っていて、漢字を含む) */
 function playable() {
-  return state.words.filter((w) => w.enabled && hasKanji(w.word));
+  return setWords().filter((w) => w.enabled && hasKanji(w.word));
+}
+
+function currentSetName() {
+  const set = state.sets.find((x) => x.id === state.currentSet);
+  return set ? set.name : '';
+}
+
+/** 追加した結果の文(どのテストの、何枚目の写真か) */
+function addedText(added) {
+  if (!added) return 'このテストに新しく追加する語はありませんでした(同じ語がもう入っています)。';
+  return `「${currentSetName()}」に ${added} 語を追加しました。`;
+}
+
+/** テストの選択欄と、テストの情報を表示する */
+function renderSets() {
+  const sel = $('set-select');
+  sel.textContent = '';
+  for (const set of state.sets) {
+    const o = document.createElement('option');
+    o.value = set.id;
+    o.textContent = `${set.name}(${wordsOf(state.words, set.id).length} 語)`;
+    sel.appendChild(o);
+  }
+  sel.value = state.currentSet;
+  const n = setWords().length, photos = photoCount(state.words, state.currentSet);
+  $('set-info').textContent = `「${currentSetName()}」: ${n} 語(写真 ${photos} 枚)`;
+  $('set-name-inline').textContent = `「${currentSetName()}」`;
+  $('btn-set-delete').disabled = false;
+}
+
+function onSetChange() {
+  state.currentSet = $('set-select').value;
+  printItems = [];
+  renderPrintItems();
+  persist();
+  renderWordList();
+}
+
+function onSetNew() {
+  const name = globalThis.prompt('新しいテストの名前(例: 1 学期 中間テスト)', `テスト ${state.sets.length + 1}`);
+  if (name === null) return;
+  const set = createSet(state.sets, name);
+  state.currentSet = set.id;
+  printItems = [];
+  renderPrintItems();
+  persist();
+  renderWordList();
+}
+
+function onSetRename() {
+  const set = state.sets.find((x) => x.id === state.currentSet);
+  const name = globalThis.prompt('テストの名前', set.name);
+  if (name === null || !name.trim()) return;
+  set.name = name.trim();
+  persist();
+  renderWordList();
+}
+
+function onSetDelete() {
+  const n = setWords().length;
+  if (!globalThis.confirm(`「${currentSetName()}」と、その中の ${n} 語(成績も)を削除しますか? 元に戻せません。`)) return;
+  const r = deleteSet(state.sets, state.words, state.currentSet);
+  state.sets = r.sets;
+  state.words = r.words;
+  state.currentSet = r.currentSet;
+  printItems = [];
+  renderPrintItems();
+  persist();
+  renderWordList();
 }
 
 function updateCount() {
   const list = playable();
   const n = list.length;
   const wrong = list.filter((w) => w.result === 'fail').length;
-  $('word-count').textContent = `出題する語: ${n} / ${state.words.length}`;
+  $('word-count').textContent = `出題する語: ${n} / ${setWords().length}`;
   $('btn-start').disabled = n === 0;
   $('btn-start').textContent = `全問出題する(${n} 語)`;
   $('btn-start-wrong').disabled = wrong === 0;
@@ -604,7 +749,7 @@ function updateCount() {
   $('btn-start-new').textContent = `未出題の語だけ出題する(${fresh} 語)`;
   // 区分ごとの集計(すべての語)
   const count = Object.fromEntries(STATUS_ORDER.map((k) => [k, 0]));
-  for (const w of state.words) if (hasKanji(w.word)) count[statusOf(w)]++;
+  for (const w of setWords()) if (hasKanji(w.word)) count[statusOf(w)]++;
   const sum = $('result-summary');
   sum.textContent = '';
   for (const key of STATUS_ORDER) {
@@ -615,7 +760,7 @@ function updateCount() {
     b.textContent = `${STATUS_LABEL[key]} ${count[key]} 語`;
     sum.appendChild(b);
   }
-  $('btn-reset-results').disabled = count.none === state.words.filter((w) => hasKanji(w.word)).length;
+  $('btn-reset-results').disabled = count.none === setWords().filter((w) => hasKanji(w.word)).length;
 }
 
 function onAddWord(e) {
@@ -628,7 +773,9 @@ function onAddWord(e) {
     return;
   }
   hideMessage();
-  state.words.push({ id: newId(), word, reading, before: '', after: '', enabled: true, manual: true });
+  if (!addWords(state.words, state.currentSet, [{ word, reading }], 'manual')) {
+    showMessage('この語は、このテストにもう入っています。', 'info');
+  }
   $('add-word').value = '';
   $('add-reading').value = '';
   persist();
@@ -704,7 +851,7 @@ async function renderQuestion() {
   strokeOrder = [];
   current = { word: w, judged: false, autoPass: false, manualPass: false, selfPending: false, selfOk: null };
 
-  $('progress').textContent = `${s.round} 回目 ${s.index + 1} / ${s.queue.length} 問`;
+  $('progress').textContent = `「${currentSetName()}」 ${s.round} 回目 ${s.index + 1} / ${s.queue.length} 問`;
   $('reading').textContent = w.reading || '(読みなし)';
   const ctx = $('context');
   ctx.textContent = '';
@@ -1045,22 +1192,26 @@ function init() {
   });
   $('btn-extract').addEventListener('click', onExtract);
   $('btn-all').addEventListener('click', () => {
-    for (const w of state.words) w.enabled = true;
+    for (const w of setWords()) w.enabled = true;
     persist();
     renderWordList();
   });
   $('btn-none').addEventListener('click', () => {
-    for (const w of state.words) w.enabled = false;
+    for (const w of setWords()) w.enabled = false;
     persist();
     renderWordList();
   });
   $('add-form').addEventListener('submit', onAddWord);
+  $('set-select').addEventListener('change', onSetChange);
+  $('btn-set-new').addEventListener('click', onSetNew);
+  $('btn-set-rename').addEventListener('click', onSetRename);
+  $('btn-set-delete').addEventListener('click', onSetDelete);
   $('btn-start').addEventListener('click', () => startSession('all'));
   $('btn-start-wrong').addEventListener('click', () => startSession('wrong'));
   $('btn-start-new').addEventListener('click', () => startSession('new'));
   $('btn-reset-results').addEventListener('click', () => {
-    if (!globalThis.confirm('合格・不合格の記録をすべて消しますか?')) return;
-    for (const w of state.words) {
+    if (!globalThis.confirm(`「${currentSetName()}」の合格・不合格の記録をすべて消しますか?`)) return;
+    for (const w of setWords()) {
       w.result = null;
       w.misses = 0;
       w.passedAt = null;

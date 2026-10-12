@@ -36,6 +36,18 @@
   <main>
     <!-- 設定画面 -->
     <section id="screen-setup" class="screen">
+      <div class="card set-card">
+        <h2>テスト(出題の範囲)</h2>
+        <p class="hint">中間テスト・期末テストなど、テストごとに語をまとめます。取り込んだ語は、ここで選んでいるテストに入り、出題もこのテストの中からだけ行います。</p>
+        <div class="row">
+          <select id="set-select" class="set-select" aria-label="テストを選ぶ"></select>
+          <button type="button" id="btn-set-new" class="btn">新しいテスト</button>
+          <button type="button" id="btn-set-rename" class="btn">名前を変える</button>
+          <button type="button" id="btn-set-delete" class="btn">削除</button>
+        </div>
+        <p id="set-info" class="status" aria-live="polite"></p>
+      </div>
+
       <div class="card">
         <h2>1. 問題を取り込む</h2>
         <div class="seg seg-wide" role="radiogroup" aria-label="取り込み方">
@@ -110,7 +122,7 @@
       </div>
 
       <div class="card">
-        <h2>2. 出題する語</h2>
+        <h2>2. 出題する語 <span id="set-name-inline" class="set-name"></span></h2>
         <div class="row">
           <button type="button" id="btn-all" class="btn">全部選ぶ</button>
           <button type="button" id="btn-none" class="btn">全部外す</button>
@@ -120,7 +132,7 @@
           <p id="result-summary" class="result-summary"></p>
           <button type="button" id="btn-reset-results" class="btn small">成績をリセット</button>
         </div>
-        <ul id="word-list" class="word-list"></ul>
+        <div id="word-list" class="word-list"></div>
         <form id="add-form" class="row add-form">
           <input id="add-word" placeholder="語(例: 覚える)" aria-label="追加する語" autocomplete="off">
           <input id="add-reading" placeholder="読み(例: おぼえる)" aria-label="追加する語の読み" autocomplete="off">

@@ -219,7 +219,16 @@ textarea { min-height: 140px; resize: vertical; }
 .answer .warn { color: var(--ng); font-size: 14px; }
 
 /* 語の一覧 */
-.word-list { list-style: none; padding: 0; margin: 0; }
+.word-list ul { list-style: none; padding: 0; margin: 0 0 8px; }
+.group-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 14px 0 4px; padding: 6px 10px; border-radius: 10px; background: var(--btn); font-size: 16px; }
+.group-head .gname { font-weight: 800; }
+.group-head .gcount { color: var(--muted); font-size: 14px; flex: 1; }
+.group-head .check { min-height: 44px; white-space: nowrap; }
+.group-head .check span { white-space: nowrap; }
+.group-head .check input { flex-shrink: 0; width: 26px; height: 26px; accent-color: var(--accent); }
+.set-card { border: 2px solid var(--accent); }
+.set-select { min-height: 48px; font: inherit; font-size: 18px; font-weight: 700; padding: 6px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--text); flex: 1 1 220px; max-width: 100%; }
+.set-name { color: var(--accent); font-size: 16px; }
 .word-list li {
   display: grid;
   grid-template-columns: 48px minmax(90px, 1fr) minmax(110px, 1.3fr) 48px;
