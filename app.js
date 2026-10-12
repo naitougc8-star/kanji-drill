@@ -15,7 +15,7 @@ const $ = (id) => document.getElementById(id);
 const state = {
   text: '',
   words: [],
-  settings: { level: DEFAULT_LEVEL, checkOrder: false, vertical: false, srcMode: 'print' },
+  settings: { level: DEFAULT_LEVEL, checkOrder: false, vertical: false, srcMode: 'print', theme: 'auto' },
   session: null,
 };
 
@@ -47,6 +47,8 @@ function restore() {
   }
   if (saved.settings) {
     if (LEVELS[saved.settings.level]) state.settings.level = saved.settings.level;
+    else if (saved.settings.level === 'extreme') state.settings.level = 'severe'; // 超シビアはなくなったので、シビアにする
+    if (['auto', 'light', 'dark'].includes(saved.settings.theme)) state.settings.theme = saved.settings.theme;
     state.settings.checkOrder = !!saved.settings.checkOrder;
     state.settings.vertical = !!saved.settings.vertical;
     if (saved.settings.srcMode === 'text') state.settings.srcMode = 'text';
@@ -597,6 +599,9 @@ function updateCount() {
   $('btn-start').textContent = `全問出題する(${n} 語)`;
   $('btn-start-wrong').disabled = wrong === 0;
   $('btn-start-wrong').textContent = `不合格の語だけ出題する(${wrong} 語)`;
+  const fresh = list.filter((w) => !w.result).length;
+  $('btn-start-new').disabled = fresh === 0;
+  $('btn-start-new').textContent = `未出題の語だけ出題する(${fresh} 語)`;
   // 区分ごとの集計(すべての語)
   const count = Object.fromEntries(STATUS_ORDER.map((k) => [k, 0]));
   for (const w of state.words) if (hasKanji(w.word)) count[statusOf(w)]++;
@@ -641,14 +646,17 @@ function shuffle(a) {
   return b;
 }
 
-/** 出題を始める。onlyWrong なら、前回不合格だった語だけ */
-function startSession(onlyWrong = false) {
+/**
+ * 出題を始める。
+ * @param {'all' | 'wrong' | 'new'} which 全問 / 前回不合格だった語だけ / まだ出題していない語だけ
+ */
+function startSession(which = 'all') {
   hideMessage();
   const ids = playable()
-    .filter((w) => !onlyWrong || w.result === 'fail')
+    .filter((w) => (which === 'wrong' ? w.result === 'fail' : which === 'new' ? !w.result : true))
     .map((w) => w.id);
   if (!ids.length) {
-    showMessage(onlyWrong ? '不合格の語はありません。' : '出題する語がありません。');
+    showMessage({ wrong: '不合格の語はありません。', new: '未出題の語はありません。' }[which] || '出題する語がありません。');
     return;
   }
   state.session = { history: [], round: 0 };
@@ -950,6 +958,13 @@ function finishRound() {
 
 // ---------- 初期化 ----------
 
+/** 画面の表示(自動 / ライト / ダーク)を当てる */
+function applyTheme() {
+  const t = state.settings.theme;
+  if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+  else delete document.documentElement.dataset.theme;
+}
+
 function bindSettings() {
   for (const r of document.querySelectorAll('input[name="level"]')) {
     r.checked = r.value === state.settings.level;
@@ -965,6 +980,16 @@ function bindSettings() {
       persist();
     });
   }
+  for (const r of document.querySelectorAll('input[name="theme"]')) {
+    r.checked = r.value === state.settings.theme;
+    r.addEventListener('change', () => {
+      if (!r.checked) return;
+      state.settings.theme = r.value;
+      applyTheme();
+      persist();
+    });
+  }
+  applyTheme();
   const co = $('check-order');
   co.checked = state.settings.checkOrder;
   co.addEventListener('change', () => {
@@ -1030,8 +1055,9 @@ function init() {
     renderWordList();
   });
   $('add-form').addEventListener('submit', onAddWord);
-  $('btn-start').addEventListener('click', () => startSession(false));
-  $('btn-start-wrong').addEventListener('click', () => startSession(true));
+  $('btn-start').addEventListener('click', () => startSession('all'));
+  $('btn-start-wrong').addEventListener('click', () => startSession('wrong'));
+  $('btn-start-new').addEventListener('click', () => startSession('new'));
   $('btn-reset-results').addEventListener('click', () => {
     if (!globalThis.confirm('合格・不合格の記録をすべて消しますか?')) return;
     for (const w of state.words) {
@@ -1060,7 +1086,7 @@ function init() {
   });
 
   $('btn-retry').addEventListener('click', () => startRound(state.session.wrong));
-  $('btn-restart').addEventListener('click', () => startSession(false));
+  $('btn-restart').addEventListener('click', () => startSession('all'));
   $('btn-setup').addEventListener('click', () => {
     renderWordList();
     showScreen('setup');

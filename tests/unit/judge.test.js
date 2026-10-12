@@ -146,22 +146,34 @@ describe('模擬の手書きによる検証', () => {
     }
   });
 
-  it('紛らわしいペア(画数が同じ): シビアで誤合格 5% 以下、超シビアはさらに低い', () => {
+  it('超甘い: 「雑」の誤差でも 95% 以上が合格する。形がはっきり違うペアは不合格のまま', () => {
+    const rate = passRate(chars, 'superLenient', NOISE.rough, 8, 2);
+    console.log(`超甘い/雑 合格率 ${(rate * 100).toFixed(1)}%`);
+    expect(rate).toBeGreaterThanOrEqual(0.95);
+    expect(rate).toBeGreaterThan(passRate(chars, 'lenient', NOISE.rough, 8, 2));
+    for (const [x, y] of [['干', '千'], ['千', '干'], ['人', '入'], ['入', '人'], ['午', '牛'], ['牛', '午'], ['刀', '力'], ['力', '刀']]) {
+      expect(falsePass(x, y, 'superLenient', 200, 7), `${x}→${y}`).toBeLessThanOrEqual(0.05);
+    }
+    // 横画の長さだけが違うペアも、半分以上は見分ける
+    for (const [x, y] of [['末', '未'], ['未', '末'], ['士', '土'], ['土', '士'], ['日', '曰'], ['曰', '日']]) {
+      expect(falsePass(x, y, 'superLenient', 200, 7), `${x}→${y}`).toBeLessThanOrEqual(0.4);
+    }
+  });
+
+  it('紛らわしいペア(画数が同じ): シビアで誤合格 5% 以下、厳しさの順に誤合格が減る', () => {
     const rows = [];
-    let sumSevere = 0, sumExtreme = 0;
+    const order = ['superLenient', 'lenient', 'standard', 'severe'];
+    const sum = Object.fromEntries(order.map((l) => [l, 0]));
     for (const [a, b] of CONFUSABLE_SAME) {
       for (const [x, y] of [[a, b], [b, a]]) {
-        const severe = falsePass(x, y, 'severe', 200, 7);
-        const extreme = falsePass(x, y, 'extreme', 200, 7);
-        rows.push(`${x}→${y} シビア ${(severe * 100).toFixed(1)}% / 超シビア ${(extreme * 100).toFixed(1)}%`);
-        expect(severe, `${x}→${y}`).toBeLessThanOrEqual(0.05);
-        expect(extreme, `${x}→${y}`).toBeLessThanOrEqual(severe);
-        sumSevere += severe;
-        sumExtreme += extreme;
+        const rates = order.map((l) => falsePass(x, y, l, 200, 7));
+        rows.push(`${x}→${y} ` + order.map((l, i) => `${LEVELS[l].label} ${(rates[i] * 100).toFixed(1)}%`).join(' / '));
+        expect(rates[3], `${x}→${y}`).toBeLessThanOrEqual(0.05);
+        order.forEach((l, i) => (sum[l] += rates[i]));
       }
     }
     console.log(rows.join('\n'));
-    expect(sumExtreme).toBeLessThan(sumSevere);
+    for (let i = 1; i < order.length; i++) expect(sum[order[i]]).toBeLessThanOrEqual(sum[order[i - 1]]);
   });
 
   it('紛らわしいペア(画数が違う): 100% 不合格', () => {

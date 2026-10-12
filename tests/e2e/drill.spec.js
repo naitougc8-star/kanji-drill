@@ -385,3 +385,63 @@ test('間違えた回数で色分け(黄・オレンジ・赤)、何回目で合
 
   expect(problems, problems.join('\n')).toEqual([]);
 });
+
+test('未出題の語だけ出題する・判定の厳しさ 4 段階・画面のライト/ダーク切り替え', async ({ page, baseURL }) => {
+  const problems = watch(page, baseURL);
+  await page.goto('./');
+  await page.evaluate(() => localStorage.clear());
+  await page.reload();
+  await expect(page.locator('body')).toHaveAttribute('data-ready', '1');
+
+  // 厳しさは 4 段階(超シビアはない)。初期値はシビア
+  await expect(page.locator('input[name="level"]')).toHaveCount(4);
+  expect(await page.locator('input[name="level"]').evaluateAll((els) => els.map((e) => e.value))).toEqual(['superLenient', 'lenient', 'standard', 'severe']);
+  await expect(page.locator('input[name="level"][value="severe"]')).toBeChecked();
+  await page.locator('label', { hasText: '超甘い' }).click();
+  await expect(page.locator('input[name="level"][value="superLenient"]')).toBeChecked();
+
+  // 未出題の語だけ出題する
+  for (const [w, r] of [['山', 'やま'], ['川', 'かわ'], ['空', 'そら']]) {
+    await page.fill('#add-word', w);
+    await page.fill('#add-reading', r);
+    await page.click('#add-form button');
+  }
+  await expect(page.locator('#btn-start-new')).toHaveText('未出題の語だけ出題する(3 語)');
+  await page.click('#btn-start-new');
+  await expect(page.locator('#progress')).toContainText('1 / 3 問');
+  const first = await page.locator('#screen-drill').getAttribute('data-word');
+  await drawStrokes(page, page.locator('#cells .cell').first(), await templateOf(page, first));
+  await page.click('#btn-judge');
+  await page.click('#btn-next');
+  await page.click('#btn-quit'); // 1 問だけ答えてやめる
+  await expect(page.locator(`#word-list li[data-word="${first}"]`)).toHaveClass(/res-pass/);
+  await expect(page.locator('#btn-start-new')).toHaveText('未出題の語だけ出題する(2 語)');
+  await page.click('#btn-start-new');
+  await expect(page.locator('#progress')).toContainText('1 / 2 問');
+  expect(await page.locator('#screen-drill').getAttribute('data-word')).not.toBe(first);
+  await page.click('#btn-quit');
+
+  // 画面の表示: 自動 → ダーク → ライト。再読み込みしても残る(描画の前に当たる)
+  const bg = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  await page.emulateMedia({ colorScheme: 'light' });
+  await expect(page.locator('input[name="theme"][value="auto"]')).toBeChecked();
+  const lightBg = await bg();
+  await page.locator('label', { hasText: 'ダーク' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  const darkBg = await bg();
+  expect(darkBg).not.toBe(lightBg);
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  expect(await bg()).toBe(darkBg);
+  // 端末がダークでも、ライトを選べばライト
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.locator('label', { hasText: 'ライト' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  expect(await bg()).toBe(lightBg);
+  // 自動に戻すと、端末の設定(ダーク)に合わせる
+  await page.locator('label', { hasText: '自動' }).click();
+  await expect(page.locator('html')).not.toHaveAttribute('data-theme', /./);
+  expect(await bg()).toBe(darkBg);
+
+  expect(problems, problems.join('\n')).toEqual([]);
+});

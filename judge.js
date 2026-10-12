@@ -5,11 +5,12 @@
 
 /** 厳しさごとのしきい値。数値の根拠は README の「判定のしきい値」を参照。 */
 export const LEVELS = {
+  // 超甘い: 形のゆれをさらに大きく許す(画数・書き順・明らかに違う形は不合格のまま。横画の長さだけが違う似た字は通ることがある)
+  superLenient: { label: '超甘い', mean: 0.26, max: 0.54, end: 0.33, lenLo: 0.42, lenHi: 2.4, lenAbs: 0.33, angle: 48, aspect: 0.8, relLen: 0.6, maxRot: 30, maxScale: 1.9, rule: 1.4, group: 0.55 },
   // 甘い: 字の形のゆれ(位置・長さ・角度)は大きく許し、似た字を見分けるチェック(長さの関係・字ごとのルール)は標準と同じくらいに残す
   lenient: { label: '甘い', mean: 0.2, max: 0.42, end: 0.26, lenLo: 0.5, lenHi: 2.0, lenAbs: 0.26, angle: 38, aspect: 0.65, relLen: 0.5, maxRot: 25, maxScale: 1.7, rule: 1.2, group: 0.5 },
-  standard: { label: '標準', mean: 0.15, max: 0.32, end: 0.21, lenLo: 0.58, lenHi: 1.7, lenAbs: 0.2, angle: 30, aspect: 0.55, relLen: 0.5, maxRot: 20, maxScale: 1.5, rule: 1.3, group: 0.5 },
+  standard: { label: '標準', mean: 0.15, max: 0.32, end: 0.21, lenLo: 0.58, lenHi: 1.7, lenAbs: 0.2, angle: 30, aspect: 0.55, relLen: 0.5, maxRot: 20, maxScale: 1.5, rule: 1.2, group: 0.5 },
   severe: { label: 'シビア', mean: 0.11, max: 0.25, end: 0.16, lenLo: 0.68, lenHi: 1.48, lenAbs: 0.15, angle: 22, aspect: 0.42, relLen: 0.35, maxRot: 15, maxScale: 1.4, rule: 1.0, group: 0.32 },
-  extreme: { label: '超シビア', mean: 0.085, max: 0.19, end: 0.125, lenLo: 0.76, lenHi: 1.32, lenAbs: 0.12, angle: 15, aspect: 0.32, relLen: 0.28, maxRot: 12, maxScale: 1.3, rule: 0.8, group: 0.25 },
 };
 
 export const DEFAULT_LEVEL = 'severe';

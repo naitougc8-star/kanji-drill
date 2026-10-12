@@ -14,6 +14,13 @@
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <link rel="icon" type="image/png" href="icons/icon-192.png">
   <link rel="stylesheet" href="style.css">
+  <script>
+    // 保存した画面の表示(ライト/ダーク)を、描画の前に当てる(一瞬ちがう色になるのを防ぐ)
+    try {
+      var t = JSON.parse(localStorage.getItem('kakitori-drill.v1') || '{}').settings;
+      if (t && (t.theme === 'light' || t.theme === 'dark')) document.documentElement.dataset.theme = t.theme;
+    } catch (e) {}
+  </script>
   <script type="module" src="app.js"></script>
 </head>
 <body>
@@ -122,20 +129,29 @@
       </div>
 
       <div class="card">
-        <h2>3. 判定の設定</h2>
+        <h2>3. 判定と画面の設定</h2>
         <div class="row">
           <span class="label-inline">厳しさ</span>
           <div class="seg" role="radiogroup" aria-label="判定の厳しさ">
+            <label><input type="radio" name="level" value="superLenient"><span>超甘い</span></label>
             <label><input type="radio" name="level" value="lenient"><span>甘い</span></label>
             <label><input type="radio" name="level" value="standard"><span>標準</span></label>
             <label><input type="radio" name="level" value="severe" checked><span>シビア</span></label>
-            <label><input type="radio" name="level" value="extreme"><span>超シビア</span></label>
           </div>
           <label class="check"><input type="checkbox" id="check-order"><span>書き順も判定する</span></label>
+        </div>
+        <div class="row">
+          <span class="label-inline">画面</span>
+          <div class="seg" role="radiogroup" aria-label="画面の表示">
+            <label><input type="radio" name="theme" value="auto" checked><span>自動</span></label>
+            <label><input type="radio" name="theme" value="light"><span>ライト</span></label>
+            <label><input type="radio" name="theme" value="dark"><span>ダーク</span></label>
+          </div>
         </div>
         <div class="start-row">
           <button type="button" id="btn-start" class="btn primary big">全問出題する</button>
           <button type="button" id="btn-start-wrong" class="btn big btn-wrong">不合格の語だけ出題する</button>
+          <button type="button" id="btn-start-new" class="btn big btn-new">未出題の語だけ出題する</button>
         </div>
       </div>
     </section>
