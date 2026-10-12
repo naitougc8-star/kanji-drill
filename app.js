@@ -207,6 +207,8 @@ async function onReadMarks() {
     const lines = raw.map((l) => fixKatakana(l));
     const items = [];
     for (let i = 0; i < crops.length; i++) {
+      // 表の外の余白などを列として切り出した場合は、文字がないので出さない
+      if (table && !lines[i]) continue;
       const item = {
         id: newId(),
         text: lines[i],

@@ -250,3 +250,14 @@ test('表のプリント: 表を囲む → 1 列ずつ自動で切り出す → 
 
   expect(problems, problems.join('\n')).toEqual([]);
 });
+
+test('表のプリント: 囲まずに写真全体で読むと、表の外の余白は問題として出さない', async ({ page }) => {
+  test.setTimeout(300_000);
+  await page.goto('./');
+  await page.evaluate(() => localStorage.clear());
+  await page.reload();
+  await page.setInputFiles('#photo', 'tests/fixtures/print-table.png');
+  await page.click('#btn-read-marks');
+  await expect(page.locator('#mark-status')).toContainText('10 問を読み取りました', { timeout: 120_000 });
+  await expect(page.locator('#print-items > li')).toHaveCount(10);
+});
