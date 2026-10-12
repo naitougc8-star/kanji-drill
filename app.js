@@ -41,6 +41,8 @@ function restore() {
         enabled: w.enabled !== false,
         manual: !!w.manual,
         result: w.result === 'pass' || w.result === 'fail' ? w.result : null, // 最後に出題したときの結果
+        misses: Number.isInteger(w.misses) ? w.misses : w.result === 'fail' ? 1 : 0, // 続けて間違えた回数
+        passedAt: Number.isInteger(w.passedAt) ? w.passedAt : null, // 何回目で合格したか
       }));
   }
   if (saved.settings) {
@@ -466,10 +468,10 @@ function renderWordList() {
   ul.textContent = '';
   for (const w of state.words) {
     const li = document.createElement('li');
-    li.className = [w.enabled ? '' : 'off', w.result ? `res-${w.result}` : ''].join(' ').trim();
+    li.className = [w.enabled ? '' : 'off', `res-${statusOf(w)}`].join(' ').trim();
     li.dataset.id = w.id;
     li.dataset.word = w.word;
-    li.dataset.result = w.result || 'none';
+    li.dataset.result = statusOf(w);
 
     const on = document.createElement('label');
     on.className = 'on';
@@ -521,7 +523,7 @@ function renderWordList() {
     // 2 行目: 合格・不合格の印と、文脈
     const meta = document.createElement('div');
     meta.className = 'meta';
-    meta.appendChild(resultBadge(w.result));
+    meta.appendChild(resultBadge(w));
     const ctx = contextHtml(w);
     if (ctx) {
       const c = document.createElement('span');
@@ -541,14 +543,44 @@ function renderWordList() {
   updateCount();
 }
 
-const RESULT_LABEL = { pass: '○ 合格', fail: '× 不合格', none: '未出題' };
+// 色分けの区分: 合格(緑)・1 回まちがい(黄)・2 回まちがい(オレンジ)・3 回以上まちがい(赤)・未出題(灰)
+const STATUS_ORDER = ['pass', 'fail1', 'fail2', 'fail3', 'none'];
+// 集計の表記(語の一覧の印は statusText で「× 2 回まちがい」「○ 3 回目で合格」のように出す)
+const STATUS_LABEL = { pass: '○ 合格', fail1: '× 1 回まちがい', fail2: '× 2 回まちがい', fail3: '× 3 回以上', none: '未出題' };
 
-function resultBadge(result) {
+/** 語の区分。まだ合格していない語は、続けて間違えた回数で分ける */
+function statusOf(w) {
+  if (w.result === 'pass') return 'pass';
+  if (w.result === 'fail') return w.misses >= 3 ? 'fail3' : w.misses === 2 ? 'fail2' : 'fail1';
+  return 'none';
+}
+
+/** 語の区分の説明(例:「○ 3 回目で合格」「× 2 回まちがい」) */
+function statusText(w) {
+  const s = statusOf(w);
+  if (s === 'pass') return w.passedAt ? `○ ${w.passedAt} 回目で合格` : '○ 合格';
+  if (s === 'none') return '未出題';
+  return `× ${w.misses || 1} 回まちがい`;
+}
+
+function resultBadge(w) {
   const b = document.createElement('span');
-  const key = result || 'none';
-  b.className = `res ${key}`;
-  b.textContent = RESULT_LABEL[key];
+  b.className = `res ${statusOf(w)}`;
+  b.textContent = statusText(w);
   return b;
+}
+
+/** 出題の結果を語に記録する(保存される) */
+function recordResult(w, pass) {
+  if (pass) {
+    // 合格した回目(続けて間違えた回数 + 1)。合格のまま再び合格したときは、最初に合格した回目を残す
+    if (w.result !== 'pass') w.passedAt = (w.misses || 0) + 1;
+    w.misses = 0;
+    w.result = 'pass';
+  } else {
+    w.misses = (w.result === 'fail' ? w.misses || 1 : 0) + 1;
+    w.result = 'fail';
+  }
 }
 
 /** 出題できる語(チェックが入っていて、漢字を含む) */
@@ -565,17 +597,20 @@ function updateCount() {
   $('btn-start').textContent = `全問出題する(${n} 語)`;
   $('btn-start-wrong').disabled = wrong === 0;
   $('btn-start-wrong').textContent = `不合格の語だけ出題する(${wrong} 語)`;
-  // 合格・不合格・未出題の集計(すべての語)
-  const count = { pass: 0, fail: 0, none: 0 };
-  for (const w of state.words) if (hasKanji(w.word)) count[w.result || 'none']++;
+  // 区分ごとの集計(すべての語)
+  const count = Object.fromEntries(STATUS_ORDER.map((k) => [k, 0]));
+  for (const w of state.words) if (hasKanji(w.word)) count[statusOf(w)]++;
   const sum = $('result-summary');
   sum.textContent = '';
-  for (const key of ['pass', 'fail', 'none']) {
-    const b = resultBadge(key === 'none' ? null : key);
-    b.textContent = `${RESULT_LABEL[key]} ${count[key]} 語`;
+  for (const key of STATUS_ORDER) {
+    if (key.startsWith('fail') && count[key] === 0) continue; // 0 語のまちがいの区分は出さない
+    const b = document.createElement('span');
+    b.className = `res ${key}`;
+    b.dataset.status = key;
+    b.textContent = `${STATUS_LABEL[key]} ${count[key]} 語`;
     sum.appendChild(b);
   }
-  $('btn-reset-results').disabled = count.pass + count.fail === 0;
+  $('btn-reset-results').disabled = count.none === state.words.filter((w) => hasKanji(w.word)).length;
 }
 
 function onAddWord(e) {
@@ -858,7 +893,7 @@ function onNext() {
   const s = state.session;
   const pass = wordPassed();
   s.results.push({ id: current.word.id, pass });
-  current.word.result = pass ? 'pass' : 'fail'; // 語の一覧の色分けに使う(保存する)
+  recordResult(current.word, pass); // 語の一覧の色分けに使う(保存する)
   persist();
   s.index++;
   if (s.index < s.queue.length) renderQuestion();
@@ -885,9 +920,13 @@ function finishRound() {
   for (const r of ordered) {
     const w = wordById(r.id);
     const li = document.createElement('li');
-    li.className = r.pass ? 'pass' : 'fail';
+    li.className = statusOf(w);
     li.dataset.word = w.word;
     li.textContent = `${r.pass ? '○' : '×'} ${w.word}`;
+    const st = document.createElement('span');
+    st.className = 'st';
+    st.textContent = statusText(w).replace(/^[○×] /, '');
+    li.appendChild(st);
     const rd = document.createElement('span');
     rd.className = 'rd';
     rd.textContent = w.reading;
@@ -995,7 +1034,11 @@ function init() {
   $('btn-start-wrong').addEventListener('click', () => startSession(true));
   $('btn-reset-results').addEventListener('click', () => {
     if (!globalThis.confirm('合格・不合格の記録をすべて消しますか?')) return;
-    for (const w of state.words) w.result = null;
+    for (const w of state.words) {
+      w.result = null;
+      w.misses = 0;
+      w.passedAt = null;
+    }
     persist();
     renderWordList();
   });

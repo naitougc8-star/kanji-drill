@@ -122,7 +122,7 @@ test('写真の OCR → 語の取り出し → 出題 → 手書き → 判定 �
   await expect(page.locator('#screen-result')).toBeVisible();
   await expect(page.locator('#score')).toHaveText('2 問中 1 問正解');
   // この回の全問が、合格は緑・不合格は赤で並ぶ
-  await expect(page.locator('#round-list li.fail')).toHaveText(/× 先生/);
+  await expect(page.locator('#round-list li.fail1')).toHaveText(/× 先生.*1 回まちがい/);
   await expect(page.locator('#round-list li.pass')).toHaveText(/○ 手紙/);
   await expect(page.locator('#history tbody tr')).toHaveCount(1);
 
@@ -290,8 +290,19 @@ test('通信の失敗は画面にメッセージを出し、手入力で続け�
   await page.click('#btn-start');
   await expect(page.locator('#reading')).toHaveText('やま');
 });
+/** 1 回出題して、各問を正しく(または間違えて)書く。correct(word) が true なら正しく書く */
+async function playRound(page, correct) {
+  const n = Number((await page.locator('#progress').textContent()).match(/\/ (\d+) 問/)[1]);
+  for (let q = 0; q < n; q++) {
+    const word = await page.locator('#screen-drill').getAttribute('data-word');
+    const t = await templateOf(page, word);
+    await drawStrokes(page, page.locator('#cells .cell').first(), correct(word) ? t : t.slice(0, 1));
+    await page.click('#btn-judge');
+    await page.click('#btn-next');
+  }
+}
 
-test('合格・不合格の色分けと、不合格の語だけ出題・全問出題', async ({ page, baseURL }) => {
+test('間違えた回数で色分け(黄・オレンジ・赤)、何回目で合格したかの記録、不合格の語だけ出題・全問出題', async ({ page, baseURL }) => {
   const problems = watch(page, baseURL);
   await page.goto('./');
   await page.evaluate(() => localStorage.clear());
@@ -302,56 +313,70 @@ test('合格・不合格の色分けと、不合格の語だけ出題・全問�
     await page.fill('#add-reading', r);
     await page.click('#add-form button');
   }
+  const row = (w) => page.locator(`#word-list li[data-word="${w}"]`);
   // 最初はすべて未出題。不合格がないので「不合格の語だけ」は押せない
   await expect(page.locator('#word-list li[data-result="none"]')).toHaveCount(3);
   await expect(page.locator('#btn-start')).toHaveText('全問出題する(3 語)');
   await expect(page.locator('#btn-start-wrong')).toBeDisabled();
 
-  // 「山」だけ正しく書き、ほかは間違える
+  // 1 回目: 「山」だけ正しく書く → 山は 1 回目で合格、川・空は 1 回まちがい(黄)
   await page.click('#btn-start');
-  for (let q = 0; q < 3; q++) {
-    const word = await page.locator('#screen-drill').getAttribute('data-word');
-    const t = await templateOf(page, word);
-    await drawStrokes(page, page.locator('#cells .cell').first(), word === '山' ? t : t.slice(0, 1));
-    await page.click('#btn-judge');
-    await page.click('#btn-next');
-  }
-  await expect(page.locator('#round-list li.fail')).toHaveCount(2);
-  await expect(page.locator('#round-list li.pass')).toHaveCount(1);
-  await expect(page.locator('#round-list li').first()).toHaveClass(/fail/); // 不合格が先に並ぶ
-
-  // 設定に戻ると、語の一覧が色分けされている
+  await playRound(page, (w) => w === '山');
+  await expect(page.locator('#round-list li.fail1')).toHaveCount(2);
+  await expect(page.locator('#round-list li.pass')).toHaveText(/○ 山.*1 回目で合格/);
+  await expect(page.locator('#round-list li').first()).toHaveClass(/fail1/); // まちがいが先に並ぶ
   await page.click('#btn-setup');
-  await expect(page.locator('#word-list li[data-word="山"]')).toHaveClass(/res-pass/);
-  await expect(page.locator('#word-list li[data-word="山"] .res')).toHaveText('○ 合格');
-  await expect(page.locator('#word-list li[data-word="川"]')).toHaveClass(/res-fail/);
-  await expect(page.locator('#word-list li[data-word="川"] .res')).toHaveText('× 不合格');
-  await expect(page.locator('#result-summary')).toHaveText(/○ 合格 1 語.*× 不合格 2 語.*未出題 0 語/);
+  await expect(row('山')).toHaveClass(/res-pass/);
+  await expect(row('山').locator('.res')).toHaveText('○ 1 回目で合格');
+  await expect(row('川')).toHaveClass(/res-fail1/);
+  await expect(row('川').locator('.res')).toHaveText('× 1 回まちがい');
+  await expect(page.locator('#result-summary')).toHaveText(/○ 合格 1 語.*× 1 回まちがい 2 語.*未出題 0 語/);
   await expect(page.locator('#btn-start-wrong')).toHaveText('不合格の語だけ出題する(2 語)');
 
-  // 再読み込みしても色分けは残る
-  await page.reload();
-  await expect(page.locator('#word-list li[data-word="空"]')).toHaveClass(/res-fail/);
-
-  // 不合格の語だけ出題 → 2 問。両方正しく書くと、全部合格になる
+  // 2 回目(不合格の語だけ): 2 問。「空」だけ正しく書く → 空は 2 回目で合格、川は 2 回まちがい(オレンジ)
   await page.click('#btn-start-wrong');
   await expect(page.locator('#progress')).toContainText('1 / 2 問');
-  for (let q = 0; q < 2; q++) {
-    const word = await page.locator('#screen-drill').getAttribute('data-word');
-    expect(['川', '空']).toContain(word);
-    await drawStrokes(page, page.locator('#cells .cell').first(), await templateOf(page, word));
-    await page.click('#btn-judge');
-    await expect(page.locator('#verdict-title')).toHaveText('○ 合格');
-    await page.click('#btn-next');
-  }
+  await playRound(page, (w) => w === '空');
   await page.click('#btn-setup');
+  await expect(row('空').locator('.res')).toHaveText('○ 2 回目で合格');
+  await expect(row('川')).toHaveClass(/res-fail2/);
+  await expect(row('川').locator('.res')).toHaveText('× 2 回まちがい');
+
+  // 3 回目: 川をまた間違える → 赤
+  await page.click('#btn-start-wrong');
+  await expect(page.locator('#progress')).toContainText('1 / 1 問');
+  await playRound(page, () => false);
+  await expect(page.locator('#round-list li.fail3')).toHaveText(/× 川.*3 回まちがい/);
+  await page.click('#btn-setup');
+  await expect(row('川')).toHaveClass(/res-fail3/);
+  await expect(row('川').locator('.res')).toHaveText('× 3 回まちがい');
+
+  // 再読み込みしても残る
+  await page.reload();
+  await expect(row('川')).toHaveClass(/res-fail3/);
+  await expect(row('空').locator('.res')).toHaveText('○ 2 回目で合格');
+
+  // 4 回目で合格 → 緑で「4 回目で合格」。不合格がなくなる
+  await page.click('#btn-start-wrong');
+  await playRound(page, () => true);
+  await expect(page.locator('#round-list li.pass')).toHaveText(/○ 川.*4 回目で合格/);
+  await page.click('#btn-setup');
+  await expect(row('川').locator('.res')).toHaveText('○ 4 回目で合格');
   await expect(page.locator('#word-list li.res-pass')).toHaveCount(3);
   await expect(page.locator('#btn-start-wrong')).toBeDisabled();
 
-  // 全問出題する → 3 問
+  // 全問出題する → 3 問。合格のまま再び合格しても、最初に合格した回目は残る
   await page.click('#btn-start');
   await expect(page.locator('#progress')).toContainText('1 / 3 問');
-  await page.click('#btn-quit');
+  await playRound(page, () => true);
+  await page.click('#btn-setup');
+  await expect(row('川').locator('.res')).toHaveText('○ 4 回目で合格');
+
+  // 合格したあとで間違えたら、1 回まちがい(黄)から数え直す
+  await page.click('#btn-start');
+  await playRound(page, (w) => w !== '山');
+  await page.click('#btn-setup');
+  await expect(row('山')).toHaveClass(/res-fail1/);
 
   // 成績をリセット
   page.once('dialog', (d) => d.accept());
