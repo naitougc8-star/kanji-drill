@@ -21,7 +21,7 @@ const state = {
   words: [],
   sets: [], // テスト(出題の範囲)
   currentSet: null, // 選んでいるテスト
-  settings: { level: DEFAULT_LEVEL, checkOrder: false, vertical: false, srcMode: 'print', theme: 'auto', folds: {} },
+  settings: { level: DEFAULT_LEVEL, checkOrder: false, vertical: false, srcMode: 'print', theme: 'auto', folds: {}, groupFolds: [] },
   session: null,
 };
 
@@ -83,6 +83,8 @@ function restoreSaved() {
     if (saved.settings.folds && typeof saved.settings.folds === 'object') {
       for (const [k, v] of Object.entries(saved.settings.folds)) if (typeof v === 'boolean') state.settings.folds[k] = v;
     }
+    // 閉じている写真のまとまり(「テストの id:まとまり」)
+    if (Array.isArray(saved.settings.groupFolds)) state.settings.groupFolds = saved.settings.groupFolds.filter((k) => typeof k === 'string');
   }
 }
 
@@ -677,13 +679,24 @@ function renderWordList() {
     box.append(groupHead(g));
     const ul = document.createElement('ul');
     ul.dataset.group = g.key;
+    ul.hidden = groupClosed(g.key);
     for (const w of g.words) ul.appendChild(wordRow(w));
     box.appendChild(ul);
   }
   updateCount();
 }
 
-/** 写真ごとのまとまりの見出し(まとめて出題する・しない、まとめて削除) */
+/** 写真ごとのまとまりの開け閉めを覚えるときの名前(テストごと) */
+function groupFoldKey(groupKey) {
+  return `${state.currentSet}:${groupKey}`;
+}
+
+/** 写真ごとのまとまりを閉じているか(初めは開いている) */
+function groupClosed(groupKey) {
+  return state.settings.groupFolds.includes(groupFoldKey(groupKey));
+}
+
+/** 写真ごとのまとまりの見出し(開け閉め、まとめて出題する・しない、まとめて削除) */
 function groupHead(g) {
   const head = document.createElement('div');
   head.className = 'group-head';
@@ -723,7 +736,23 @@ function groupHead(g) {
     persist();
     renderWordList();
   });
-  head.append(name, count, on, del);
+  // まとまりの開け閉め(閉じると、語の一覧を隠す)
+  const fold = document.createElement('button');
+  fold.type = 'button';
+  fold.className = 'gfold';
+  const open = !groupClosed(g.key);
+  fold.setAttribute('aria-expanded', open ? 'true' : 'false');
+  fold.setAttribute('aria-label', `${g.label}の語を${open ? '閉じる' : '開く'}`);
+  fold.addEventListener('click', () => {
+    const key = groupFoldKey(g.key);
+    const closed = new Set(state.settings.groupFolds);
+    if (closed.has(key)) closed.delete(key);
+    else closed.add(key);
+    state.settings.groupFolds = [...closed];
+    persist();
+    renderWordList();
+  });
+  head.append(name, count, fold, on, del);
   return head;
 }
 
