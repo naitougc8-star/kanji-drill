@@ -11,6 +11,8 @@ import { candidates, makeScorer, guessTarget, normalizeReading, lookupBrowser, c
 import * as storage from './storage.js';
 import { migrate, wordsOf, photoCount, addWords, groupsOf, createSet, deleteSet } from './sets.js';
 import { makeBackup, backupFileName, parseBackup, mergeBackup, dataSize, formatSize, STORAGE_LIMIT } from './backup.js';
+import { KIND_LABEL, kindOf, detectKind, isHeaderText, yomiWord, yomiParts } from './kinds.js';
+import { matchPoems, poemByNo } from './hyakunin.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -64,6 +66,8 @@ function restoreSaved() {
         setId: w.setId, // どのテストか
         updatedAt: Number(w.updatedAt) || 0, // 最後に変更した時刻(ほかの端末のデータと合わせるときに使う)
         photo: Number.isInteger(w.photo) ? w.photo : w.photo === null ? null : undefined, // テストの中の何枚目の写真か
+        ...(w.kind === 'yomi' || w.kind === 'hyakunin' ? { kind: w.kind } : {}), // 問題の種類(書き取りは付けない)
+        ...(Number.isInteger(w.no) ? { no: w.no } : {}), // 百人一首の歌の番号
       }));
   }
   if (Array.isArray(saved.sets)) state.sets = saved.sets;
@@ -124,6 +128,9 @@ async function onPhotoSelected(e) {
     $('marker-box').hidden = false;
     $('marker-tools').hidden = false;
     marker.setImage(img);
+    // 前の写真で読み取った問題は消す(1 枚の写真の中では、表を囲み直して何回でも読み取り、問題を足せる)
+    printItems = [];
+    renderPrintItems();
     // 文章: 画像全体の OCR 用に前処理しておく
     ocrCanvas = preprocess(img);
     $('ocr-preview').src = ocrCanvas.toDataURL('image/jpeg', 0.7);
@@ -209,27 +216,63 @@ async function onReadMarks() {
     for (let i = 0; i < crops.length; i++) {
       // 表の外の余白などを列として切り出した場合は、文字がないので出さない
       if (table && !lines[i]) continue;
+      // 名前の欄・見出し(「氏名」「一年 組 番」「百人一首」など)も出さない
+      if (table && isHeaderText(lines[i])) continue;
       const item = {
         id: newId(),
         text: lines[i],
         crop: crops[i].canvas.toDataURL('image/png'),
         vertical: crops[i].vertical,
         table, // 表の形式(書き取る部分がカタカナ)
+        kind: detectKind(lines[i]), // 書き取り・読み・百人一首
         sel: new Set(),
         answers: new Map(),
         cands: new Map(),
       };
-      await guessSelection(item);
+      await setupItem(item);
       items.push(item);
     }
-    printItems = items;
-    $('mark-status').textContent = `${items.length} 問を読み取りました。書き取る部分(カタカナ・ひらがな)が選ばれているか、答えの漢字が正しいかを確かめてください。`;
+    // 同じ写真の中で、表を囲み直して読み取った問題は後ろに足す(右の表と左の百人一首を、別々に囲んで読み取れる)
+    printItems = printItems.concat(items);
+    const total = printItems.length > items.length ? `(合わせて ${printItems.length} 問)` : '';
+    $('mark-status').textContent = `${items.length} 問を読み取りました${total}。問題の種類(書き取り・読み・百人一首)と、答えが正しいかを確かめてください。`;
     renderPrintItems();
   } catch (err) {
     $('mark-status').textContent = '';
     showMessage(`読み取れませんでした(${err.message || err})。下の「文章」に切り替えるか、語を手で追加して続けられます。`);
   } finally {
     btn.disabled = false;
+  }
+}
+
+/** 問題の種類に合わせて、答えの下ごしらえをする(書き取り: 書き取る部分、読み: 語と読み、百人一首: 歌の候補) */
+async function setupItem(item) {
+  if (item.kind === 'yomi') {
+    item.word = yomiWord(item.text);
+    item.reading = await readingOf(item.word);
+  } else if (item.kind === 'hyakunin') {
+    item.poems = matchPoems(item.text);
+    item.poemNo = item.poems.length ? item.poems[0].poem.no : null;
+    item.prompt = item.poems.length ? item.poems[0].prompt : '';
+  } else {
+    await guessSelection(item);
+  }
+}
+
+/** 語の読み(kuromoji)。辞書にない字を含むときは空(手で入力してもらう) */
+async function readingOf(word) {
+  if (!hasKanji(word)) return '';
+  try {
+    const tokenizer = await loadTokenizer();
+    let out = '';
+    for (const t of tokenizer.tokenize(word)) {
+      if (t.reading && t.reading !== '*') out += t.reading;
+      else if (hasKanji(t.surface_form)) return '';
+      else out += t.surface_form;
+    }
+    return normalizeReading(out);
+  } catch {
+    return ''; // 辞書が読めなくても、手で入力できる
   }
 }
 
@@ -328,10 +371,44 @@ function renderPrintItems() {
       item.text = line.value.replace(/\s+/g, '');
       item.answers.clear();
       item.cands.clear();
-      await guessSelection(item);
+      await setupItem(item);
       renderPrintItems();
     });
     lineRow.append(line);
+
+    // 問題の種類(読み取った文字から決めたもの。タップで変えられる)
+    const kindRow = document.createElement('div');
+    kindRow.className = 'kind-row';
+    kindRow.setAttribute('role', 'group');
+    kindRow.setAttribute('aria-label', `${idx + 1} 問目の種類`);
+    for (const k of ['kaki', 'yomi', 'hyakunin']) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn small kind' + (item.kind === k ? ' on' : '');
+      b.dataset.kind = k;
+      b.textContent = KIND_LABEL[k];
+      b.setAttribute('aria-pressed', item.kind === k ? 'true' : 'false');
+      b.addEventListener('click', async () => {
+        if (item.kind === k) return;
+        item.kind = k;
+        item.answers.clear();
+        item.cands.clear();
+        await setupItem(item);
+        renderPrintItems();
+      });
+      kindRow.appendChild(b);
+    }
+
+    if (item.kind === 'yomi') {
+      li.append(cropBox, lineRow, kindRow, yomiEditor(item, idx));
+      ol.appendChild(li);
+      return;
+    }
+    if (item.kind === 'hyakunin') {
+      li.append(cropBox, lineRow, kindRow, poemEditor(item, idx));
+      ol.appendChild(li);
+      return;
+    }
 
     // 1 文字ずつのボタン(タップで書き取る部分を選ぶ)
     const chips = document.createElement('div');
@@ -409,21 +486,118 @@ function renderPrintItems() {
       answers.appendChild(box);
     }
 
-    li.append(cropBox, lineRow, chips, hint, answers);
+    li.append(cropBox, lineRow, kindRow, chips, hint, answers);
     ol.appendChild(li);
   });
   $('print-add-row').hidden = printItems.length === 0;
 }
 
-function onAddPrintWords() {
-  const entries = [];
-  for (const item of printItems) {
-    for (const run of runsOf(item)) {
-      const word = (item.answers.get(run.key) || '').trim();
-      if (!run.reading || !hasKanji(word)) continue;
-      entries.push({ word, reading: run.reading, before: run.before, after: run.after });
-    }
+/** 読みの問題: 出題する語と、答えの読み(直せる) */
+function yomiEditor(item, idx) {
+  const box = document.createElement('div');
+  box.className = 'answers yomi-edit';
+  const wl = document.createElement('label');
+  wl.textContent = '問題の語';
+  const wi = document.createElement('input');
+  wi.className = 'ans';
+  wi.value = item.word || '';
+  wi.placeholder = '漢字(例: 翡翠)';
+  wi.setAttribute('aria-label', `${idx + 1} 問目の、読みを答える語`);
+  wi.addEventListener('change', async () => {
+    item.word = wi.value.trim();
+    item.reading = await readingOf(item.word);
+    renderPrintItems();
+  });
+  wl.appendChild(wi);
+  const rl = document.createElement('label');
+  rl.textContent = '答えの読み';
+  const ri = document.createElement('input');
+  ri.className = 'ans';
+  ri.value = item.reading || '';
+  ri.placeholder = 'ひらがな(例: ひすい)';
+  ri.setAttribute('aria-label', `${idx + 1} 問目の、答えの読み`);
+  ri.addEventListener('change', () => {
+    item.reading = normalizeReading(ri.value);
+    renderPrintItems();
+  });
+  rl.appendChild(ri);
+  box.append(wl, rl);
+  const note = document.createElement('div');
+  if (!hasKanji(item.word || '')) {
+    note.className = 'warn';
+    note.textContent = '問題の語に漢字が入っていません';
+  } else if (!item.reading) {
+    note.className = 'warn';
+    note.textContent = '読みを辞書で見つけられませんでした。答えの読みを入力してください';
+  } else {
+    const p = yomiParts(item.word, item.reading);
+    note.className = 'hint';
+    note.textContent = `書く部分: ${p.head ? `(${p.head})` : ''}${p.write}${p.tail ? `(${p.tail})` : ''} … 辞書で引いた読みです。プリントの答えと違うときは直してください。`;
   }
+  box.appendChild(note);
+  return box;
+}
+
+/** 百人一首: 初句に合う歌を選ぶ */
+function poemEditor(item, idx) {
+  const box = document.createElement('div');
+  box.className = 'answers poem-edit';
+  if (!item.poems || !item.poems.length) {
+    const w = document.createElement('div');
+    w.className = 'warn';
+    w.textContent = '百人一首の初句に合う歌が見つかりません。読み取り結果を初句(例: 花の色は)に直してください。';
+    box.appendChild(w);
+    return box;
+  }
+  const cbox = document.createElement('div');
+  cbox.className = 'cands';
+  cbox.setAttribute('aria-label', `${idx + 1} 問目の歌の候補`);
+  for (const c of item.poems.slice(0, 4)) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'btn cand' + (item.poemNo === c.poem.no ? ' on' : '');
+    b.textContent = `${c.poem.no}. ${c.poem.ku[0]} ${c.poem.ku[1]}…`;
+    b.addEventListener('click', () => {
+      item.poemNo = c.poem.no;
+      item.prompt = c.prompt;
+      renderPrintItems();
+    });
+    cbox.appendChild(b);
+  }
+  const poem = poemByNo(item.poemNo);
+  const p = document.createElement('p');
+  p.className = 'poem';
+  p.textContent = poem ? poem.text : '';
+  const q = document.createElement('div');
+  q.className = 'hint';
+  q.textContent = `出題: 「${item.prompt}」の続きを書く`;
+  box.append(cbox, p, q);
+  return box;
+}
+
+/** 読み取った問題から、語の一覧に入れる語を作る */
+function printEntries(item) {
+  if (item.kind === 'yomi') {
+    const reading = normalizeReading(item.reading);
+    if (!hasKanji(item.word || '') || !reading) return [];
+    return [{ word: item.word, reading, kind: 'yomi' }];
+  }
+  if (item.kind === 'hyakunin') {
+    const poem = poemByNo(item.poemNo);
+    if (!poem) return [];
+    return [{ word: poem.text, reading: poem.kana, before: item.prompt || poem.ku[0], kind: 'hyakunin', no: poem.no }];
+  }
+  const out = [];
+  for (const run of runsOf(item)) {
+    const word = (item.answers.get(run.key) || '').trim();
+    if (!run.reading || !hasKanji(word)) continue;
+    out.push({ word, reading: run.reading, before: run.before, after: run.after });
+  }
+  return out;
+}
+
+function onAddPrintWords() {
+  const entries = printItems.flatMap(printEntries);
   // 写真 1 枚分として、選んでいるテストに入れる
   const added = entries.length ? addWords(state.words, state.currentSet, entries, 'photo') : 0;
   persist();
@@ -485,6 +659,7 @@ async function onExtract() {
 
 function contextHtml(w) {
   const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  if (kindOf(w) === 'hyakunin') return `出題: ${esc(questionText(w))}`;
   if (!w.before && !w.after) return '';
   return `${esc(w.before)}<mark>${esc(w.word)}</mark>${esc(w.after)}`;
 }
@@ -609,10 +784,16 @@ function wordRow(w) {
   });
 
   li.append(on, wi, ri, del);
-  // 2 行目: 合格・不合格の印と、文脈
+  // 2 行目: 合格・不合格の印と、問題の種類と、文脈
   const meta = document.createElement('div');
   meta.className = 'meta';
   meta.appendChild(resultBadge(w));
+  if (kindOf(w) !== 'kaki') {
+    const k = document.createElement('span');
+    k.className = `kind-tag ${kindOf(w)}`;
+    k.textContent = KIND_LABEL[kindOf(w)];
+    meta.appendChild(k);
+  }
   const ctx = contextHtml(w);
   if (ctx) {
     const c = document.createElement('span');
@@ -621,10 +802,11 @@ function wordRow(w) {
     meta.appendChild(c);
   }
   li.appendChild(meta);
-  if (!hasKanji(w.word)) {
+  const why = unplayableReason(w);
+  if (why) {
     const warn = document.createElement('div');
     warn.className = 'warn';
-    warn.textContent = '漢字を含まないので出題しません';
+    warn.textContent = why;
     li.appendChild(warn);
   }
   return li;
@@ -671,15 +853,35 @@ function recordResult(w, pass) {
   }
 }
 
-/** 出題できる語(チェックが入っていて、漢字を含む) */
 /** 選んでいるテストの語 */
 function setWords() {
   return wordsOf(state.words, state.currentSet);
 }
 
-/** 出題できる語(選んでいるテストの中で、チェックが入っていて、漢字を含む) */
+/** 出題できない理由(出題できるなら空) */
+function unplayableReason(w) {
+  const kind = kindOf(w);
+  if (kind === 'hyakunin') return w.word ? '' : '歌が入っていないので出題しません';
+  if (!hasKanji(w.word)) return '漢字を含まないので出題しません';
+  if (kind === 'yomi' && !yomiParts(w.word, w.reading).write) return '答えの読みが入っていないので出題しません';
+  return '';
+}
+
+function canPlay(w) {
+  return !unplayableReason(w);
+}
+
+/** 出題で見せる文字(書き取り: 読み、読み: 漢字、百人一首: 初句) */
+function questionText(w) {
+  const kind = kindOf(w);
+  if (kind === 'hyakunin') return w.before || w.word.split(' ')[0];
+  if (kind === 'yomi') return w.word;
+  return w.reading;
+}
+
+/** 出題できる語(選んでいるテストの中で、チェックが入っていて、出題できる) */
 function playable() {
-  return setWords().filter((w) => w.enabled && hasKanji(w.word));
+  return setWords().filter((w) => w.enabled && canPlay(w));
 }
 
 function currentSetName() {
@@ -767,7 +969,7 @@ function updateCount() {
   $('btn-start-new').textContent = `未出題の語だけ出題する(${fresh} 語)`;
   // 区分ごとの集計(すべての語)
   const count = Object.fromEntries(STATUS_ORDER.map((k) => [k, 0]));
-  for (const w of setWords()) if (hasKanji(w.word)) count[statusOf(w)]++;
+  for (const w of setWords()) if (canPlay(w)) count[statusOf(w)]++;
   const sum = $('result-summary');
   sum.textContent = '';
   for (const key of STATUS_ORDER) {
@@ -778,20 +980,41 @@ function updateCount() {
     b.textContent = `${STATUS_LABEL[key]} ${count[key]} 語`;
     sum.appendChild(b);
   }
-  $('btn-reset-results').disabled = count.none === setWords().filter((w) => hasKanji(w.word)).length;
+  $('btn-reset-results').disabled = count.none === setWords().filter(canPlay).length;
 }
 
-function onAddWord(e) {
+async function onAddWord(e) {
   e.preventDefault();
+  const kind = $('add-kind').value;
   const word = $('add-word').value.trim();
-  const reading = kataToHira($('add-reading').value.trim());
+  let reading = kataToHira($('add-reading').value.trim());
   if (!word) return;
-  if (!hasKanji(word)) {
-    showMessage('漢字を含む語を入力してください。');
-    return;
+  let entry;
+  if (kind === 'hyakunin') {
+    // 初句(例: 花の色は)から歌を探す
+    const m = matchPoems(word)[0];
+    if (!m) {
+      showMessage('百人一首の初句が見つかりませんでした。初句(例: 花の色は)を入力してください。');
+      return;
+    }
+    entry = { word: m.poem.text, reading: m.poem.kana, before: m.prompt, kind, no: m.poem.no };
+  } else {
+    if (!hasKanji(word)) {
+      showMessage('漢字を含む語を入力してください。');
+      return;
+    }
+    if (kind === 'yomi') {
+      if (!reading) reading = await readingOf(word);
+      reading = normalizeReading(reading);
+      if (!yomiParts(word, reading).write) {
+        showMessage('答えの読みを、ひらがなで入力してください。');
+        return;
+      }
+    }
+    entry = { word, reading, kind };
   }
   hideMessage();
-  if (!addWords(state.words, state.currentSet, [{ word, reading }], 'manual')) {
+  if (!addWords(state.words, state.currentSet, [entry], 'manual')) {
     showMessage('この語は、このテストにもう入っています。', 'info');
   }
   $('add-word').value = '';
@@ -851,8 +1074,8 @@ function cellSize(segs) {
   const avail = Math.min($('cells').clientWidth || 800, 900);
   const nk = segs.filter((s) => s.kanji).length;
   const kanaChars = segs.filter((s) => !s.kanji).reduce((n, s) => n + [...s.text].length, 0);
-  const kanaW = kanaChars * Math.min(64, avail * 0.08);
-  const size = Math.floor((avail - kanaW - 8 * segs.length) / Math.max(1, nk));
+  // かなは マスの 0.42 倍の大きさで書く(renderQuestion)ので、その幅も含めて 1 行に収まる大きさにする
+  const size = Math.floor((avail - 8 * segs.length) / Math.max(1, nk + kanaChars * 0.42));
   return Math.max(110, Math.min(260, size));
 }
 
@@ -869,24 +1092,46 @@ async function renderQuestion() {
   strokeOrder = [];
   current = { word: w, judged: false, autoPass: false, manualPass: false, selfPending: false, selfOk: null };
 
+  const kind = kindOf(w);
   $('progress').textContent = `「${currentSetName()}」 ${s.round} 回目 ${s.index + 1} / ${s.queue.length} 問`;
-  $('reading').textContent = w.reading || '(読みなし)';
+  const reading = $('reading');
+  reading.textContent = kind === 'kaki' ? w.reading || '(読みなし)' : questionText(w) + (kind === 'hyakunin' ? ' …' : '');
+  reading.dataset.kind = kind;
   const ctx = $('context');
   ctx.textContent = '';
-  if (w.before || w.after) {
+  if (kind === 'yomi') {
+    ctx.textContent = '読みを、ひらがなで書きましょう';
+  } else if (kind === 'hyakunin') {
+    ctx.textContent = '百人一首: 続きを思い出して、紙やノートに書いてから「答えを見る」を押しましょう';
+  } else if (w.before || w.after) {
     const blank = document.createElement('span');
     blank.className = 'blank';
     blank.textContent = '　'.repeat(Math.max(2, [...w.word].length));
     ctx.append(w.before, blank, w.after);
   }
   $('screen-drill').dataset.word = w.word;
+  $('screen-drill').dataset.kind = kind;
   $('verdict').hidden = true;
+  $('answer').hidden = true;
   $('tools').hidden = false;
+  for (const id of ['btn-undo', 'btn-clear', 'btn-clear-all']) $(id).hidden = kind === 'hyakunin';
+  $('btn-judge').textContent = kind === 'hyakunin' ? '答えを見る' : '判定する';
   $('btn-judge').disabled = false;
 
-  const segs = segments(w.word);
+  // 書くマス。読みの問題は、答えの読みのひらがな 1 字ずつ(送りがななど、語と同じかなは書かない)
+  let segs;
+  if (kind === 'hyakunin') segs = [];
+  else if (kind === 'yomi') {
+    const p = yomiParts(w.word, w.reading);
+    segs = [
+      ...(p.head ? [{ kanji: false, text: p.head }] : []),
+      ...[...p.write].map((ch) => ({ kanji: true, text: ch })),
+      ...(p.tail ? [{ kanji: false, text: p.tail }] : []),
+    ];
+  } else segs = segments(w.word);
   const box = $('cells');
   box.textContent = '';
+  box.classList.toggle('wrap', kind === 'yomi');
   const size = cellSize(segs);
   for (const seg of segs) {
     if (!seg.kanji) {
@@ -975,9 +1220,14 @@ async function onJudge() {
   }
   current.judged = true;
   $('tools').hidden = true;
+  const w = current.word;
+  const kind = kindOf(w);
+  showAnswer(w);
+  $('selfcheck-text').textContent =
+    kind === 'hyakunin' ? '続きを正しく書けましたか?' : 'お手本データがない字です。正しく書けましたか?';
   const reasons = [];
   let allOk = true;
-  let needSelf = false;
+  let needSelf = kind === 'hyakunin'; // 百人一首は、答えを見て自己採点
   for (const cell of pads) {
     cell.pad.locked = true;
     if (!cell.tmpl) {
@@ -1027,6 +1277,39 @@ async function onJudge() {
   updateVerdict();
 }
 
+/** 答えを表示する(読み: 答えの読み、百人一首: 歌。初句は薄く)。書き取りは、マスの横のお手本が答え */
+function showAnswer(w) {
+  const box = $('answer');
+  box.textContent = '';
+  const kind = kindOf(w);
+  if (kind === 'kaki') {
+    box.hidden = true;
+    return;
+  }
+  if (kind === 'yomi') {
+    const p = yomiParts(w.word, w.reading);
+    const b = document.createElement('b');
+    b.textContent = p.write;
+    box.append(`答え: ${w.word} → ${p.head}`, b, p.tail);
+  } else {
+    const poem = poemByNo(w.no);
+    const ku = poem ? poem.ku : w.word.split(' ');
+    const first = document.createElement('span');
+    first.className = 'given';
+    first.textContent = ku[0];
+    const rest = document.createElement('b');
+    rest.textContent = ku.slice(1).join(' ');
+    box.append(first, ' ', rest);
+    if (poem) {
+      const no = document.createElement('small');
+      no.textContent = `(${poem.no} 番)`;
+      box.append(' ', no);
+    }
+  }
+  box.dataset.kind = kind;
+  box.hidden = false;
+}
+
 function wordPassed() {
   if (current.manualPass) return true;
   if (!current.autoPass) return false;
@@ -1047,7 +1330,7 @@ function updateVerdict() {
     t.textContent = '× 不合格';
     t.className = 'verdict-title ng';
   }
-  $('btn-override').hidden = wordPassed();
+  $('btn-override').hidden = wordPassed() || pending;
   $('btn-next').disabled = pending;
 }
 
@@ -1095,14 +1378,14 @@ function finishRound() {
     const li = document.createElement('li');
     li.className = statusOf(w);
     li.dataset.word = w.word;
-    li.textContent = `${r.pass ? '○' : '×'} ${w.word}`;
+    li.textContent = `${r.pass ? '○' : '×'} ${kindOf(w) === 'hyakunin' ? questionText(w) + '…' : w.word}`;
     const st = document.createElement('span');
     st.className = 'st';
     st.textContent = statusText(w).replace(/^[○×] /, '');
     li.appendChild(st);
     const rd = document.createElement('span');
     rd.className = 'rd';
-    rd.textContent = w.reading;
+    rd.textContent = kindOf(w) === 'hyakunin' ? '' : w.reading;
     li.appendChild(rd);
     ul.appendChild(li);
   }
@@ -1317,6 +1600,12 @@ function init() {
     renderWordList();
   });
   $('add-form').addEventListener('submit', onAddWord);
+  $('add-kind').addEventListener('change', () => {
+    const k = $('add-kind').value;
+    $('add-word').placeholder = { kaki: '語(例: 覚える)', yomi: '読みを答える語(例: 翡翠)', hyakunin: '初句(例: 花の色は)' }[k];
+    $('add-reading').placeholder = { kaki: '読み(例: おぼえる)', yomi: '答えの読み(空なら辞書で引きます)', hyakunin: '(入力しなくてよい)' }[k];
+    $('add-reading').disabled = k === 'hyakunin';
+  });
   $('set-select').addEventListener('change', onSetChange);
   $('btn-set-new').addEventListener('click', onSetNew);
   $('btn-set-rename').addEventListener('click', onSetRename);

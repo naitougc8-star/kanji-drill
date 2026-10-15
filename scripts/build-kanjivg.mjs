@@ -4,7 +4,7 @@
 //   node scripts/build-kanjivg.mjs <KanjiVG の kanji/ ディレクトリ>
 //   node scripts/build-kanjivg.mjs            (引数なしならリリース zip をダウンロードして展開)
 //
-// 出力: data/k4e.json … data/k9f.json, data/k30.json(々〆。〇 は KanjiVG に未収録)
+// 出力: data/k4e.json … data/k9f.json, data/k30.json(ひらがなと 々〆〇)
 //   { "65e5": [[x0,y0,x1,y1,...], ...], ... }  座標は 109×109 の整数
 //
 // KanjiVG © Ulrich Apel, CC BY-SA 3.0  https://github.com/KanjiVG/kanjivg
@@ -21,6 +21,7 @@ const RELEASE = 'r20260714';
 const ZIP_URL = `https://github.com/KanjiVG/kanjivg/releases/download/${RELEASE}/kanjivg-20260714-main.zip`;
 const RDP_EPS = 0.5;
 const EXTRA = [0x3005, 0x3006, 0x3007]; // 々 〆 〇
+const HIRAGANA = [0x3041, 0x3096]; // ぁ〜ゖ(読みの問題で、ひらがなを手書きして判定する)
 
 // ---- SVG パス → 折れ線 ----
 
@@ -150,7 +151,7 @@ export function parseSvg(svg, hex) {
 }
 
 function inTarget(cp) {
-  return (cp >= 0x4e00 && cp <= 0x9fff) || EXTRA.includes(cp);
+  return (cp >= 0x4e00 && cp <= 0x9fff) || (cp >= HIRAGANA[0] && cp <= HIRAGANA[1]) || EXTRA.includes(cp);
 }
 
 async function obtainKanjiDir() {

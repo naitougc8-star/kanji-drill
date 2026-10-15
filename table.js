@@ -47,21 +47,6 @@ function verticalProfile(dark, W, H, t) {
   return P;
 }
 
-/** 傾き t で横方向に足し合わせた、縦位置ごとの黒い画素の数 */
-function horizontalProfile(dark, W, H, t) {
-  const P = new Float64Array(H);
-  const cx = W / 2;
-  for (let y = 0; y < H; y++) {
-    const row = y * W;
-    for (let x = 0; x < W; x++) {
-      if (!dark[row + x]) continue;
-      const py = Math.round(y + (x - cx) * t);
-      if (py >= 0 && py < H) P[py]++;
-    }
-  }
-  return P;
-}
-
 /**
  * 縦の罫線がいちばんまっすぐに揃う傾き(度)を求める。
  * 正の値は、下に行くほど右にずれている(時計回りに傾いている)ことを表す。
@@ -105,65 +90,149 @@ function peaks(P, minValue, mergeDist) {
   return merged;
 }
 
-/**
- * 傾きを直した(罫線がまっすぐな)画像から、縦と横の罫線の位置を見つける。
- * 縦の罫線は範囲の高さの minFrac 以上、横の罫線は幅の minFrac 以上続くものとする。
- */
-export function findGrid(dark, W, H, minFrac = 0.45) {
-  const v = peaks(verticalProfile(dark, W, H, 0), H * minFrac, Math.max(4, W * 0.01));
-  const h = peaks(horizontalProfile(dark, W, H, 0), W * minFrac, Math.max(4, H * 0.01));
-  return { v, h };
+// 罫線を探すときの設定
+const LINE_SPREAD = 2; // 線の太さ方向に ±2px の幅で黒を見る(点線・少し曲がった線も 1 本の線として数える)
+const LINE_MIN = 0.4; // 線とみなす割合(範囲の幅・高さに対して)。点線は 0.5 前後、字の並びは 0.25 以下
+const TOPHAT_MIN = 0.3; // まわり(線から離れた所)より、これだけ多いこと(字の列は幅が広いので、まわりとの差は 0.25 以下)
+const BAND_RATIO = 0.7; // 問題の段 = いちばん背の高い段の 0.7 倍以上の段(番号の段・答えの段は低い)
+
+/** 線の太さ方向に spread だけ広げて数えた、横位置ごとの黒の割合(y0〜y1 の範囲で) */
+function columnFraction(dark, W, y0, y1, spread = LINE_SPREAD) {
+  const P = new Float64Array(W);
+  const n = Math.max(1, y1 - y0);
+  for (let y = Math.max(0, Math.floor(y0)); y < Math.ceil(y1); y++) {
+    const row = y * W;
+    for (let x = 0; x < W; x++) {
+      for (let d = -spread; d <= spread; d++) {
+        const xx = x + d;
+        if (xx >= 0 && xx < W && dark[row + xx]) {
+          P[x]++;
+          break;
+        }
+      }
+    }
+  }
+  for (let x = 0; x < W; x++) P[x] /= n;
+  return P;
+}
+
+/** 線の太さ方向に spread だけ広げて数えた、縦位置ごとの黒の割合 */
+function rowFraction(dark, W, H, spread = LINE_SPREAD) {
+  const P = new Float64Array(H);
+  for (let y = 0; y < H; y++) {
+    let s = 0;
+    for (let x = 0; x < W; x++) {
+      for (let d = -spread; d <= spread; d++) {
+        const yy = y + d;
+        if (yy >= 0 && yy < H && dark[yy * W + x]) {
+          s++;
+          break;
+        }
+      }
+    }
+    P[y] = s / W;
+  }
+  return P;
 }
 
 /**
- * 罫線の位置から、問題のマス(列)の範囲を決める。
- * - 縦: 縦の罫線の間。端に罫線がない場合は、範囲の端までを 1 列とみなす(幅がほかの列と同じくらいなら)
- * - 横: 横の罫線で区切られた段のうち、いちばん背の高い段(番号の段・答えの段は低い)
- * 戻り値の列は、右から左(縦書きの問題の順)。
+ * 細い山(罫線)の位置。まわり(a〜b px 離れた所)の最大より TOPHAT_MIN 以上高く、LINE_MIN 以上の所。
+ * 字の列は幅が広く、まわりも黒いので選ばれない。
  */
-export function cellsFromGrid(grid, W, H) {
-  const xs = grid.v.slice().sort((a, b) => a - b);
+function linePeaks(P, a, b, mergeDist) {
+  const n = P.length;
+  const on = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    if (P[i] < LINE_MIN) continue;
+    let around = 0;
+    for (let k = a; k <= b; k++) {
+      if (i - k >= 0) around = Math.max(around, P[i - k]);
+      if (i + k < n) around = Math.max(around, P[i + k]);
+    }
+    if (P[i] - around >= TOPHAT_MIN) on[i] = P[i];
+  }
+  return peaks(on, LINE_MIN, mergeDist);
+}
+
+/**
+ * 傾きを直した(罫線がまっすぐな)画像から、表の罫線を見つける。
+ * 段(横の罫線の間)が何段あってもよい(1〜14 番・15〜28 番・29〜40 番のように、問題が 3 段に並ぶプリント)。
+ * 列の罫線は段ごとに探す(段ごとに列の位置が違ってもよい)。罫線は実線でも点線でもよい。
+ * @returns {{h: number[], bands: {y0: number, y1: number, v: number[]}[]}} h: 横の罫線、bands: 問題の段と、その段の縦の罫線
+ */
+export function findGrid(dark, W, H) {
+  const k = Math.max(W, H) / 1600;
+  const a = Math.max(6, Math.round(8 * k)), b = Math.max(a + 4, Math.round(14 * k));
+  const h = linePeaks(rowFraction(dark, W, H), a, b, Math.max(4, H * 0.01));
+  const ys = [0, ...h, H];
+  const all = [];
+  for (let i = 1; i < ys.length; i++) all.push([ys[i - 1], ys[i]]);
+  const tallest = Math.max(...all.map(([y0, y1]) => y1 - y0));
+  const bands = all
+    .filter(([y0, y1]) => y1 - y0 >= tallest * BAND_RATIO)
+    .map(([y0, y1]) => {
+      // 段の上下の端(罫線の近く)は除いて数える
+      const m = (y1 - y0) * 0.04;
+      const v = linePeaks(columnFraction(dark, W, y0 + m, y1 - m), a, b, Math.max(4, W * 0.01));
+      return { y0, y1, v };
+    });
+  return { h, bands };
+}
+
+/** 1 段の縦の罫線から、列の範囲 [x0, x1] を左から順に作る */
+function columnsOf(v, W) {
+  const xs = v.slice().sort((p, q) => p - q);
   const gaps = [];
   for (let i = 1; i < xs.length; i++) gaps.push(xs[i] - xs[i - 1]);
-  const med = gaps.length ? gaps.slice().sort((a, b) => a - b)[gaps.length >> 1] : W;
+  if (!gaps.length) return [];
+  const med = gaps.slice().sort((p, q) => p - q)[gaps.length >> 1];
   const cols = [];
   for (let i = 1; i < xs.length; i++) {
     const w = xs[i] - xs[i - 1];
     if (w > med * 0.5) cols.push([xs[i - 1], xs[i]]);
   }
   // 端の、罫線の外側の列(範囲の取り方で罫線が入らなかった場合)
-  if (xs.length && xs[0] > med * 0.75) cols.unshift([Math.max(0, xs[0] - med), xs[0]]);
-  if (xs.length && W - xs[xs.length - 1] > med * 0.75) cols.push([xs[xs.length - 1], Math.min(W, xs[xs.length - 1] + med)]);
-  if (!cols.length) cols.push([0, W]);
+  if (xs[0] > med * 0.75) cols.unshift([Math.max(0, xs[0] - med), xs[0]]);
+  if (W - xs[xs.length - 1] > med * 0.75) cols.push([xs[xs.length - 1], Math.min(W, xs[xs.length - 1] + med)]);
+  return cols;
+}
 
-  const ys = [0, ...grid.h.slice().sort((a, b) => a - b), H];
-  let band = [0, H], bestH = -1;
-  for (let i = 1; i < ys.length; i++) {
-    if (ys[i] - ys[i - 1] > bestH) {
-      bestH = ys[i] - ys[i - 1];
-      band = [ys[i - 1], ys[i]];
-    }
+/**
+ * 罫線の位置から、問題のマス(列)の範囲を決める。
+ * - 段: 上の段から順に。縦の罫線が 2 本未満の段(表の外の余白など)は使わない
+ * - 列: 段の中で、右から左(縦書きの問題の順)
+ * 罫線が見つからないときは、範囲全体を 1 列とする。
+ */
+export function cellsFromGrid(grid, W, H) {
+  const cells = [];
+  for (const band of grid.bands) {
+    if (band.v.length < 2) continue;
+    for (const [x0, x1] of columnsOf(band.v, W).reverse()) cells.push({ x0, x1, y0: band.y0, y1: band.y1 });
   }
-  return cols.reverse().map(([x0, x1]) => ({ x0, x1, y0: band[0], y1: band[1] }));
+  if (!cells.length) cells.push({ x0: 0, x1: W, y0: 0, y1: H });
+  return cells;
 }
 
 /**
  * 横幅いっぱいに続く横線(番号の段・答えの段との区切り)がある行を探す。
  * ページの湾曲で少し曲がっていてもよいように、上下 ±2 行の幅で連続を見る。
+ * 点線の切れ目(gap px 以下)は、つながっているとみなす。
  * @returns {number[]} 横線のある y
  */
-export function horizontalLineRows(dark, W, H, x0, x1, yFrom, yTo, minLen) {
+export function horizontalLineRows(dark, W, H, x0, x1, yFrom, yTo, minLen, gap = 0) {
   const rows = [];
-  for (let y = Math.max(0, yFrom); y < Math.min(H, yTo); y++) {
-    let run = 0, best = 0;
+  for (let y = Math.max(0, Math.floor(yFrom)); y < Math.min(H, yTo); y++) {
+    let start = -1, last = -1, best = 0;
     for (let x = Math.max(0, Math.floor(x0)); x < Math.min(W, Math.ceil(x1)); x++) {
       let on = false;
       for (let dy = -2; dy <= 2 && !on; dy++) {
         const yy = y + dy;
         if (yy >= 0 && yy < H) on = dark[yy * W + x] === 1;
       }
-      run = on ? run + 1 : 0;
-      if (run > best) best = run;
+      if (!on) continue;
+      if (start < 0 || x - last - 1 > gap) start = x;
+      last = x;
+      if (last - start + 1 > best) best = last - start + 1;
     }
     if (best >= minLen) rows.push(y);
   }
@@ -183,9 +252,10 @@ export function cleanColumn(gray, W, H, box) {
   const ch = box.y1 - box.y0;
   let top = box.y0, bottom = box.y1;
   const across = (box.x1 - box.x0) * 0.85;
-  const upper = horizontalLineRows(dark, W, H, box.x0, box.x1, box.y0 - box.cellW * 0.2, box.y0 + ch * 0.3, across);
+  const gap = Math.max(3, Math.round(box.cellW * 0.06)); // 点線の切れ目
+  const upper = horizontalLineRows(dark, W, H, box.x0, box.x1, box.y0 - box.cellW * 0.2, box.y0 + ch * 0.3, across, gap);
   if (upper.length) top = Math.max(top, upper[upper.length - 1] + 4);
-  const lower = horizontalLineRows(dark, W, H, box.x0, box.x1, box.y1 - ch * 0.15, box.y1 + box.cellW * 0.2, across);
+  const lower = horizontalLineRows(dark, W, H, box.x0, box.x1, box.y1 - ch * 0.15, box.y1 + box.cellW * 0.2, across, gap);
   if (lower.length) bottom = Math.min(bottom, lower[0] - 4);
   // 字の部分(黒い画素を 2px 太らせた範囲)だけ、元の濃淡を残す(輪郭のなめらかさが OCR に効く)
   const X0 = Math.max(0, Math.floor(box.x0)), X1 = Math.min(W, Math.ceil(box.x1));

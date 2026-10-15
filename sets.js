@@ -38,7 +38,7 @@ export function nextPhoto(words, setId) {
  * 語をテストに追加する。同じテストに同じ語・同じ読みがあれば追加しない。
  * @param {object[]} words すべての語(書き換える)
  * @param {string} setId
- * @param {{word: string, reading: string, before?: string, after?: string}[]} entries
+ * @param {{word: string, reading: string, before?: string, after?: string, kind?: string, no?: number}[]} entries
  * @param {'photo' | 'manual'} kind 写真 1 枚分の取り込み(新しい写真の番号を付ける)か、手で追加か
  * @returns {number} 追加した数
  */
@@ -62,6 +62,8 @@ export function addWords(words, setId, entries, kind = 'photo') {
       setId,
       photo,
       updatedAt: Date.now(), // ほかの端末のデータと合わせるときに、新しい方を残すため
+      ...(e.kind && e.kind !== 'kaki' ? { kind: e.kind } : {}), // 読み・百人一首(書き取りは付けない)
+      ...(e.no ? { no: e.no } : {}),
     });
     added++;
   }

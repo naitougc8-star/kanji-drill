@@ -38,7 +38,7 @@ jobs:
       - name: 公開するファイルだけを _site に集める
         run: |
           mkdir _site
-          cp -r index.html app.js judge.js pad.js words.js ocr.js strokes.js storage.js marker.js yomi.js table.js sets.js backup.js style.css \
+          cp -r index.html app.js judge.js pad.js words.js ocr.js strokes.js storage.js marker.js yomi.js table.js sets.js backup.js kinds.js hyakunin.js style.css \
                 manifest.webmanifest icons data vendor _site/
           touch _site/.nojekyll
       - uses: actions/configure-pages@v6

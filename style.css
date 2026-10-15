@@ -195,7 +195,7 @@ textarea { min-height: 140px; resize: vertical; }
 .marker-box canvas { display: block; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .print-items { list-style: none; padding: 0; margin: 8px 0; }
 .pitem { border-top: 1px solid var(--line); padding: 10px 0; display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; }
-.pitem .crop-box { grid-row: span 4; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.pitem .crop-box { grid-row: span 5; display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .pitem .num { font-weight: 800; color: #5b2bb5; }
 .pitem img.crop { max-height: 200px; max-width: 120px; border: 1px solid var(--line); background: #fff; }
 .pitem img.crop.wide { max-width: 260px; max-height: 80px; }
@@ -307,3 +307,25 @@ textarea { min-height: 140px; resize: vertical; }
 .footer a { color: inherit; }
 
 [hidden] { display: none !important; }
+
+/* 問題の種類(書き取り・読み・百人一首) */
+.kind-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.btn.kind.on { background: #5b2bb5; border-color: #5b2bb5; color: #fff; }
+.yomi-edit label { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-weight: 700; }
+.yomi-edit input.ans, .add-form select { min-height: 44px; font-size: 20px; }
+.yomi-edit input.ans { width: 12em; }
+.yomi-edit .warn, .poem-edit .warn { color: var(--ng); font-size: 14px; }
+.poem-edit .cands { display: flex; flex-wrap: wrap; gap: 6px; }
+.poem-edit .cand { font-size: 17px; }
+.poem-edit .cand.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.poem-edit .poem { margin: 4px 0; font-size: 18px; }
+.add-form select { flex: 0 0 auto; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--text); padding: 0 8px; }
+.kind-tag { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 13px; font-weight: 700; margin-right: 8px; border: 1px solid #5b2bb5; color: #5b2bb5; }
+:root[data-theme="dark"] .kind-tag { border-color: #b69cf0; color: #b69cf0; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .kind-tag { border-color: #b69cf0; color: #b69cf0; } }
+.reading[data-kind="hyakunin"] { font-size: clamp(30px, 6vw, 48px); }
+.cells.wrap { flex-wrap: wrap; }
+.answer-box { text-align: center; font-size: 22px; line-height: 1.6; margin: 4px auto 8px; max-width: 40em; overflow-wrap: anywhere; }
+.answer-box b { color: var(--accent); }
+.answer-box .given { color: var(--muted); }
+.answer-box small { color: var(--muted); font-size: 14px; }

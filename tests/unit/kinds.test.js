@@ -1,0 +1,113 @@
+import { describe, it, expect } from 'vitest';
+import fs from 'node:fs';
+import { POEMS, matchPoems, editDistance } from '../../hyakunin.js';
+import { detectKind, isYomiText, yomiWord, yomiParts, isHeaderText, kindOf } from '../../kinds.js';
+import { addWords } from '../../sets.js';
+
+describe('百人一首のデータ', () => {
+  it('1〜100 番の歌が、5 句ずつ、表記とかなでそろっている', () => {
+    expect(POEMS.map((p) => p.no)).toEqual(Array.from({ length: 100 }, (_, i) => i + 1));
+    for (const p of POEMS) {
+      expect(p.ku, `${p.no} 番`).toHaveLength(5);
+      expect(p.kanaKu, `${p.no} 番`).toHaveLength(5);
+      for (const k of p.kanaKu) expect(k, `${p.no} 番`).toMatch(/^[ぁ-ゖー]+$/);
+    }
+  });
+});
+
+describe('初句から歌を探す', () => {
+  it('プリントの初句(読み取りのごみが後ろに付いていてもよい)から歌を見つける', () => {
+    expect(matchPoems('花の色は')[0].poem.no).toBe(9);
+    expect(matchPoems('花の色は。了')[0].poem.no).toBe(9);
+    expect(matchPoems('これやこの本')[0].poem.no).toBe(10);
+    expect(matchPoems('天つ風だ')[0].poem.no).toBe(12);
+    expect(matchPoems('はなのいろは')[0].poem.no).toBe(9); // かなで書かれた初句
+  });
+
+  it('初句が同じ歌は、続きの手がかりの字で選ぶ', () => {
+    const m = matchPoems('わたの原や');
+    expect(m[0].poem.no).toBe(11); // 八十島(やそしま)かけて
+    expect(m[0].prompt).toBe('わたの原 や');
+    expect(m.map((x) => x.poem.no)).toContain(76);
+    expect(matchPoems('わたの原こ')[0].poem.no).toBe(76);
+    expect(matchPoems('君がため惜')[0].poem.no).toBe(50);
+  });
+
+  it('1 字の読み違いは許す(4 字以上の初句)', () => {
+    expect(matchPoems('花の色ば')[0].poem.no).toBe(9);
+  });
+
+  it('百人一首でない文には合わない', () => {
+    expect(matchPoems('とてもアセル')).toHaveLength(0);
+    expect(matchPoems('動物がムレル')).toHaveLength(0);
+    expect(matchPoems('')).toHaveLength(0);
+  });
+
+  it('編集距離', () => {
+    expect(editDistance('花の色は', '花の色は')).toBe(0);
+    expect(editDistance('花の色ば', '花の色は')).toBe(1);
+    expect(editDistance('花の色', '花の色は')).toBe(1);
+  });
+});
+
+describe('問題の種類を見分ける', () => {
+  it('「(読み)」の印がある問題は読み', () => {
+    expect(isYomiText('翡翠(読み)')).toBe(true);
+    expect(isYomiText('可哀想読み')).toBe(true); // 括弧が読み取りで消えた
+    expect(isYomiText('往々︵読み︶')).toBe(true);
+    expect(isYomiText('ヨシノヒロシ')).toBe(false);
+    expect(yomiWord('苛まれる読み')).toBe('苛まれる');
+    expect(yomiWord('翡翠(読み)')).toBe('翡翠');
+    expect(detectKind('頓着読み')).toBe('yomi');
+  });
+
+  it('カタカナの書き取りと、百人一首を見分ける', () => {
+    expect(detectKind('水面をオオウ')).toBe('kaki');
+    expect(detectKind('花の色は')).toBe('hyakunin');
+    expect(detectKind('わたの原や')).toBe('hyakunin');
+  });
+
+  it('名前の欄・見出しは問題ではない', () => {
+    expect(isHeaderText('氏名')).toBe(true);
+    expect(isHeaderText('一年組。番')).toBe(true);
+    expect(isHeaderText('国語I百人一首')).toBe(true);
+    expect(isHeaderText('マンインの電車')).toBe(false);
+    expect(isHeaderText('')).toBe(false); // 読めなかった欄は残す
+  });
+
+  it('読みの問題で書く部分(送りがななど、語と同じかなは書かない)', () => {
+    expect(yomiParts('苛まれる', 'さいなまれる')).toEqual({ head: '', write: 'さいな', tail: 'まれる' });
+    expect(yomiParts('翡翠', 'ひすい')).toEqual({ head: '', write: 'ひすい', tail: '' });
+    expect(yomiParts('傍から', 'はたから')).toEqual({ head: '', write: 'はた', tail: 'から' });
+    expect(yomiParts('お茶', 'おちゃ')).toEqual({ head: 'お', write: 'ちゃ', tail: '' });
+    expect(yomiParts('翡翠', '').write).toBe('');
+  });
+
+  it('種類のない語(前からのデータ)は書き取り', () => {
+    expect(kindOf({ word: '覚える' })).toBe('kaki');
+    expect(kindOf({ word: '翡翠', kind: 'yomi' })).toBe('yomi');
+  });
+});
+
+describe('語の追加', () => {
+  it('読み・百人一首の種類と歌の番号を残す。書き取りには種類を付けない', () => {
+    const words = [];
+    addWords(words, 's1', [
+      { word: '覚える', reading: 'おぼえる' },
+      { word: '翡翠', reading: 'ひすい', kind: 'yomi' },
+      { word: POEMS[8].text, reading: POEMS[8].kana, before: '花の色は', kind: 'hyakunin', no: 9 },
+    ]);
+    expect(words[0].kind).toBeUndefined();
+    expect(words[1].kind).toBe('yomi');
+    expect(words[2]).toMatchObject({ kind: 'hyakunin', no: 9, before: '花の色は' });
+  });
+});
+
+describe('ひらがなのお手本', () => {
+  it('data/k30.json に、ひらがな(ぁ〜ゖ)の筆画がある', () => {
+    const d = JSON.parse(fs.readFileSync('data/k30.json', 'utf8'));
+    for (let cp = 0x3041; cp <= 0x3096; cp++) expect(d[cp.toString(16)], String.fromCharCode(cp)).toBeTruthy();
+    expect(d['3055']).toHaveLength(3); // さ
+    expect(d['306a']).toHaveLength(4); // な
+  });
+});

@@ -67,7 +67,10 @@
           <p class="hint">
             <strong>表のプリント</strong>(縦書き・番号付きの列・書き取る部分がカタカナ)は、写真を選んだら、問題の並んだ表を
             指か Apple Pencil で<strong>四角く囲んで</strong>「読み取る」を押してください。罫線から 1 問ずつ自動で切り出します
-            (囲まなければ写真全体を表として読みます)。ほかの形式のプリントは「1 問ずつなぞる」に切り替えて、問題を 1 問ずつなぞってください。
+            (囲まなければ写真全体を表として読みます)。問題が何段に並んでいても、上の段の右から順に読み取ります。
+            「(読み)」と書かれた問題は<strong>読み</strong>(ひらがなを手書き)、百人一首の初句は<strong>百人一首</strong>(続きを思い出して自己採点)になります。
+            表が 2 つあるプリント(右に漢字、左に百人一首など)は、1 つずつ囲んで「読み取る」を押すと、問題が後ろに足されます。
+            ほかの形式のプリントは「1 問ずつなぞる」に切り替えて、問題を 1 問ずつなぞってください。
           </p>
           <div id="marker-tools" class="row marker-tools" hidden>
             <div class="seg" role="radiogroup" aria-label="選び方">
@@ -134,6 +137,11 @@
         </div>
         <div id="word-list" class="word-list"></div>
         <form id="add-form" class="row add-form">
+          <select id="add-kind" aria-label="追加する問題の種類">
+            <option value="kaki">書き取り</option>
+            <option value="yomi">読み</option>
+            <option value="hyakunin">百人一首</option>
+          </select>
           <input id="add-word" placeholder="語(例: 覚える)" aria-label="追加する語" autocomplete="off">
           <input id="add-reading" placeholder="読み(例: おぼえる)" aria-label="追加する語の読み" autocomplete="off">
           <button type="submit" class="btn">追加</button>
@@ -204,9 +212,10 @@
       </div>
       <div id="verdict" class="verdict" hidden>
         <p id="verdict-title" class="verdict-title"></p>
+        <div id="answer" class="answer-box" hidden></div>
         <ul id="reasons" class="reasons"></ul>
         <div id="selfcheck" class="row" hidden>
-          <span>お手本データがない字です。正しく書けましたか?</span>
+          <span id="selfcheck-text">お手本データがない字です。正しく書けましたか?</span>
           <button type="button" id="btn-self-ok" class="btn">書けた</button>
           <button type="button" id="btn-self-ng" class="btn">書けなかった</button>
         </div>
