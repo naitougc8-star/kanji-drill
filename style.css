@@ -127,7 +127,7 @@ main { max-width: 960px; margin: 0 auto; padding: 12px 16px 24px; }
 .btn:disabled { opacity: 0.45; cursor: default; }
 .btn.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 .btn.big { min-height: 56px; width: 100%; font-size: 19px; margin-top: 8px; }
-.btn:disabled.btn-wrong, .btn:disabled.btn-new { opacity: 0.4; }
+.btn:disabled.btn-wrong, .btn:disabled.btn-new, .btn:disabled.btn-miss3 { opacity: 0.4; }
 .btn.small { min-height: 44px; padding: 6px 14px; }
 .btn:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px solid #2f6fdb; outline-offset: 2px; }
 
@@ -287,11 +287,13 @@ textarea { min-height: 140px; resize: vertical; }
 .word-list .meta { grid-column: 2 / 5; display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px; margin-top: -4px; }
 .word-list .meta .ctx { margin-top: 0; }
 .result-summary { margin: 0; font-weight: 700; display: flex; flex-wrap: wrap; gap: 6px; flex: 1; }
-.start-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
+.start-row { display: grid; grid-template-columns: 1fr; gap: 0 10px; }
+.start-sub { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0 10px; }
+.start-sub .btn.big { font-size: 16px; padding: 6px 10px; }
 .start-row #btn-start { grid-column: 1 / -1; }
 .btn.btn-wrong { background: var(--ng-bg); color: var(--ng); border-color: var(--ng); }
 .btn.btn-new { background: var(--btn); color: var(--text); border-color: var(--muted); border-style: dashed; }
-@media (max-width: 520px) { .start-row { grid-template-columns: 1fr; } }
+@media (max-width: 720px) { .start-sub { grid-template-columns: 1fr; } }
 .round-list { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
 .round-list li { border-radius: 10px; padding: 8px 12px; font-size: 22px; font-weight: 700; display: flex; flex-direction: column; }
 .round-list li.pass { background: var(--ok-bg); color: var(--ok); border: 2px solid var(--ok); }
@@ -342,3 +344,33 @@ textarea { min-height: 140px; resize: vertical; }
 .answer-box .mine { margin-top: 12px; text-align: left; }
 .answer-box .mine-text { border: 1px solid var(--line); border-radius: 8px; padding: 6px 14px; font-size: 22px; background: var(--btn); }
 .answer-box .mine-label { font-size: 14px; color: var(--muted); margin-top: 2px; }
+
+/* 1・2・4 の欄の開閉(アコーディオン) */
+details.fold > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 12px; margin: -4px 0; padding: 4px 0; -webkit-user-select: none; user-select: none; }
+details.fold > summary::-webkit-details-marker { display: none; }
+details.fold > summary h2 { margin: 0; flex: 1; }
+details.fold > summary::after {
+  content: ''; flex: 0 0 auto; width: 0; height: 0;
+  border-left: 14px solid transparent; border-right: 14px solid transparent; border-top: 20px solid var(--o-line);
+  transition: transform 0.15s;
+}
+details.fold[open] > summary { margin-bottom: 12px; }
+details.fold[open] > summary::after { transform: rotate(180deg); }
+details.fold > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 6px; }
+
+/* 3: 画面の表示は、厳しさと同じ行の右に */
+.theme-group { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
+
+/* 出題: 3 回以上間違えた語だけ */
+.btn.btn-miss3 { background: var(--o-bg); color: var(--o); border-color: var(--o-line); }
+
+/* 百人一首の「参考」と、解説の窓 */
+.btn.btn-sanko { background: var(--o-line); color: #fff; border-color: var(--o-line); }
+.sanko { width: min(96vw, 1100px); height: min(90vh, 900px); padding: 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); color: var(--text); display: none; flex-direction: column; }
+.sanko[open] { display: flex; }
+.sanko::backdrop { background: rgba(0, 0, 0, 0.55); }
+.sanko-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.sanko-title { flex: 1; margin: 0; font-weight: 700; }
+.sanko-frame { flex: 1; width: 100%; border: 0; background: #fff; }
+.sanko-note { margin: 0; padding: 4px 12px; font-size: 13px; color: var(--muted); }
+.sanko-note a { color: inherit; }

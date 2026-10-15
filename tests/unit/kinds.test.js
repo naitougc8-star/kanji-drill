@@ -156,3 +156,16 @@ describe('百人一首の答え合わせ(ひらがなで入力)', () => {
     expect(normalizeKana(' ヲトメ、の すがた。')).toBe('をとめのすがた');
   });
 });
+
+describe('百人一首の歌人と解説のページ', () => {
+  it('100 首すべてに、歌人と全日本かるた協会「一日一首」のページがある', () => {
+    const urls = new Set();
+    for (const p of POEMS) {
+      expect(p.author, `${p.no} 番`).toBeTruthy();
+      expect(p.karutaUrl, `${p.no} 番`).toMatch(/^https:\/\/www\.karuta\.or\.jp\/karuta-everyday\/\d+\/$/);
+      urls.add(p.karutaUrl);
+    }
+    expect(urls.size).toBe(100);
+    expect(POEMS[11]).toMatchObject({ author: '僧正遍昭', karutaUrl: 'https://www.karuta.or.jp/karuta-everyday/2723/' });
+  });
+});

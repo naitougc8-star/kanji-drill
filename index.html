@@ -48,8 +48,8 @@
         <p id="set-info" class="status" aria-live="polite"></p>
       </div>
 
-      <div class="card">
-        <h2>1. 問題を取り込む</h2>
+      <details class="card fold" id="fold-import" open>
+        <summary><h2>1. 問題を取り込む</h2></summary>
         <div class="seg seg-wide" role="radiogroup" aria-label="取り込み方">
           <label><input type="radio" name="src-mode" value="print" checked><span>問題プリント(なぞって選ぶ)</span></label>
           <label><input type="radio" name="src-mode" value="text"><span>文章(漢字を含む文)</span></label>
@@ -122,10 +122,10 @@
             <span id="extract-status" class="status" aria-live="polite"></span>
           </div>
         </div>
-      </div>
+      </details>
 
-      <div class="card">
-        <h2>2. 出題する語 <span id="set-name-inline" class="set-name"></span></h2>
+      <details class="card fold" id="fold-words" open>
+        <summary><h2>2. 出題する語 <span id="set-name-inline" class="set-name"></span></h2></summary>
         <div class="row">
           <button type="button" id="btn-all" class="btn">全部選ぶ</button>
           <button type="button" id="btn-none" class="btn">全部外す</button>
@@ -146,7 +146,7 @@
           <input id="add-reading" placeholder="読み(例: おぼえる)" aria-label="追加する語の読み" autocomplete="off">
           <button type="submit" class="btn">追加</button>
         </form>
-      </div>
+      </details>
 
       <div class="card">
         <h2>3. 判定と画面の設定</h2>
@@ -159,23 +159,26 @@
             <label><input type="radio" name="level" value="severe" checked><span>シビア</span></label>
           </div>
           <label class="check"><input type="checkbox" id="check-order"><span>書き順も判定する</span></label>
-        </div>
-        <div class="row">
-          <span class="label-inline">画面</span>
-          <div class="seg" role="radiogroup" aria-label="画面の表示">
-            <label><input type="radio" name="theme" value="auto" checked><span>自動</span></label>
-            <label><input type="radio" name="theme" value="light"><span>ライト</span></label>
-            <label><input type="radio" name="theme" value="dark"><span>ダーク</span></label>
-          </div>
+          <span class="theme-group">
+            <span class="label-inline">画面</span>
+            <span class="seg" role="radiogroup" aria-label="画面の表示">
+              <label><input type="radio" name="theme" value="auto" checked><span>自動</span></label>
+              <label><input type="radio" name="theme" value="light"><span>ライト</span></label>
+              <label><input type="radio" name="theme" value="dark"><span>ダーク</span></label>
+            </span>
+          </span>
         </div>
         <div class="start-row">
           <button type="button" id="btn-start" class="btn primary big">全問出題する</button>
-          <button type="button" id="btn-start-wrong" class="btn big btn-wrong">不合格の語だけ出題する</button>
-          <button type="button" id="btn-start-new" class="btn big btn-new">未出題の語だけ出題する</button>
+          <div class="start-sub">
+            <button type="button" id="btn-start-wrong" class="btn big btn-wrong">不合格の語だけ出題する</button>
+            <button type="button" id="btn-start-miss3" class="btn big btn-miss3">3 回以上間違えた語だけ出題する</button>
+            <button type="button" id="btn-start-new" class="btn big btn-new">未出題の語だけ出題する</button>
+          </div>
         </div>
       </div>
-      <div class="card">
-        <h2>4. バックアップ・ほかの端末と共有</h2>
+      <details class="card fold" id="fold-backup" open>
+        <summary><h2>4. バックアップ・ほかの端末と共有</h2></summary>
         <p class="hint">
           語と成績は、この端末のブラウザの中だけに保存されています(写真は保存しません)。
           「書き出す」でファイルにしておくと、データが消えたときに戻せます。iPad と iPhone で同じテストを使うときは、
@@ -192,7 +195,7 @@
         </p>
         <p id="backup-status" class="status" aria-live="polite"></p>
         <p id="storage-info" class="status"></p>
-      </div>
+      </details>
     </section>
 
     <!-- 出題画面 -->
@@ -226,6 +229,7 @@
         <div class="row">
           <button type="button" id="btn-override" class="btn">合格にする</button>
           <button type="button" id="btn-next" class="btn primary">次へ</button>
+          <button type="button" id="btn-sanko" class="btn btn-sanko" hidden>参考</button>
         </div>
       </div>
     </section>
@@ -250,6 +254,17 @@
       </div>
     </section>
   </main>
+
+  <!-- 百人一首の解説(全日本かるた協会「一日一首」のページを表示する) -->
+  <dialog id="sanko" class="sanko" aria-labelledby="sanko-title">
+    <div class="sanko-head">
+      <p id="sanko-title" class="sanko-title"></p>
+      <a id="sanko-link" class="btn small" href="#" target="_blank" rel="noopener">新しいタブで開く</a>
+      <button type="button" id="sanko-close" class="btn btn-sanko">閉じる</button>
+    </div>
+    <iframe id="sanko-frame" class="sanko-frame" title="百人一首の解説" referrerpolicy="no-referrer"></iframe>
+    <p class="sanko-note">解説: <a href="https://www.karuta.or.jp/karuta-everyday/" target="_blank" rel="noopener">一般社団法人 全日本かるた協会「一日一首」</a></p>
+  </dialog>
 
   <footer class="footer">
     <p>

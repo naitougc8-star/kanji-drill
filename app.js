@@ -21,7 +21,7 @@ const state = {
   words: [],
   sets: [], // テスト(出題の範囲)
   currentSet: null, // 選んでいるテスト
-  settings: { level: DEFAULT_LEVEL, checkOrder: false, vertical: false, srcMode: 'print', theme: 'auto' },
+  settings: { level: DEFAULT_LEVEL, checkOrder: false, vertical: false, srcMode: 'print', theme: 'auto', folds: {} },
   session: null,
 };
 
@@ -79,6 +79,10 @@ function restoreSaved() {
     state.settings.checkOrder = !!saved.settings.checkOrder;
     state.settings.vertical = !!saved.settings.vertical;
     if (saved.settings.srcMode === 'text') state.settings.srcMode = 'text';
+    // 1・2・4 の欄を開いているか(false = 閉じている)
+    if (saved.settings.folds && typeof saved.settings.folds === 'object') {
+      for (const [k, v] of Object.entries(saved.settings.folds)) if (typeof v === 'boolean') state.settings.folds[k] = v;
+    }
   }
 }
 
@@ -964,6 +968,9 @@ function updateCount() {
   $('btn-start').textContent = `全問出題する(${n} 語)`;
   $('btn-start-wrong').disabled = wrong === 0;
   $('btn-start-wrong').textContent = `不合格の語だけ出題する(${wrong} 語)`;
+  const miss3 = list.filter(isMiss3).length;
+  $('btn-start-miss3').disabled = miss3 === 0;
+  $('btn-start-miss3').textContent = `3 回以上間違えた語だけ出題する(${miss3} 語)`;
   const fresh = list.filter((w) => !w.result).length;
   $('btn-start-new').disabled = fresh === 0;
   $('btn-start-new').textContent = `未出題の語だけ出題する(${fresh} 語)`;
@@ -1025,6 +1032,11 @@ async function onAddWord(e) {
 
 // ---------- 3. 出題 ----------
 
+/** まだ合格しておらず、続けて 3 回以上間違えた語(語の一覧の赤) */
+function isMiss3(w) {
+  return statusOf(w) === 'fail3';
+}
+
 function shuffle(a) {
   const b = a.slice();
   for (let i = b.length - 1; i > 0; i--) {
@@ -1036,15 +1048,15 @@ function shuffle(a) {
 
 /**
  * 出題を始める。
- * @param {'all' | 'wrong' | 'new'} which 全問 / 前回不合格だった語だけ / まだ出題していない語だけ
+ * @param {'all' | 'wrong' | 'miss3' | 'new'} which 全問 / 前回不合格だった語だけ / 続けて 3 回以上間違えた語だけ / まだ出題していない語だけ
  */
 function startSession(which = 'all') {
   hideMessage();
   const ids = playable()
-    .filter((w) => (which === 'wrong' ? w.result === 'fail' : which === 'new' ? !w.result : true))
+    .filter((w) => (which === 'wrong' ? w.result === 'fail' : which === 'miss3' ? isMiss3(w) : which === 'new' ? !w.result : true))
     .map((w) => w.id);
   if (!ids.length) {
-    showMessage({ wrong: '不合格の語はありません。', new: '未出題の語はありません。' }[which] || '出題する語がありません。');
+    showMessage({ wrong: '不合格の語はありません。', miss3: '3 回以上間違えた語はありません。', new: '未出題の語はありません。' }[which] || '出題する語がありません。');
     return;
   }
   state.session = { history: [], round: 0 };
@@ -1112,6 +1124,7 @@ async function renderQuestion() {
   $('screen-drill').dataset.word = w.word;
   $('screen-drill').dataset.kind = kind;
   $('verdict').hidden = true;
+  $('btn-sanko').hidden = true;
   $('answer').hidden = true;
   $('tools').hidden = false;
   for (const id of ['btn-undo', 'btn-clear', 'btn-clear-all']) $(id).hidden = kind === 'hyakunin';
@@ -1243,6 +1256,7 @@ async function onJudge() {
   current.judged = true;
   $('tools').hidden = true;
   showAnswer(w, check);
+  $('btn-sanko').hidden = !sankoPoem(w);
   const reasons = [];
   let allOk = check ? check.pass : true;
   let needSelf = false;
@@ -1365,6 +1379,29 @@ function showAnswer(w, check = null) {
   }
   box.dataset.kind = kind;
   box.hidden = false;
+}
+
+/** 百人一首の語の歌(番号、なければ歌の表記から探す) */
+function sankoPoem(w) {
+  if (kindOf(w) !== 'hyakunin') return null;
+  return poemByNo(w.no) || (matchPoems(w.word)[0] || {}).poem || null;
+}
+
+/** 全日本かるた協会「一日一首」の、その歌のページを窓に表示する */
+function openSanko() {
+  const poem = current && sankoPoem(current.word);
+  if (!poem) return;
+  $('sanko-title').textContent = `${poem.no} 番 ${poem.author}`;
+  $('sanko-link').href = poem.karutaUrl;
+  $('sanko-frame').src = poem.karutaUrl;
+  const dlg = $('sanko');
+  if (typeof dlg.showModal === 'function') dlg.showModal();
+  else globalThis.open(poem.karutaUrl, '_blank', 'noopener'); // dialog が使えない古いブラウザ
+}
+
+function closeSanko() {
+  const dlg = $('sanko');
+  if (dlg.open) dlg.close();
 }
 
 function wordPassed() {
@@ -1673,6 +1710,21 @@ function init() {
   $('btn-start').addEventListener('click', () => startSession('all'));
   $('btn-start-wrong').addEventListener('click', () => startSession('wrong'));
   $('btn-start-new').addEventListener('click', () => startSession('new'));
+  $('btn-start-miss3').addEventListener('click', () => startSession('miss3'));
+  // 1・2・4 の欄の開閉を覚えておく
+  for (const d of document.querySelectorAll('details.fold')) {
+    const key = d.id.replace(/^fold-/, '');
+    if (state.settings.folds[key] === false) d.open = false;
+    d.addEventListener('toggle', () => {
+      state.settings.folds[key] = d.open;
+      persist();
+      if (key === 'import' && d.open && marker && marker.src) marker.layout(); // 閉じている間は写真の大きさが測れない
+    });
+  }
+  // 百人一首の解説
+  $('btn-sanko').addEventListener('click', openSanko);
+  $('sanko-close').addEventListener('click', closeSanko);
+  $('sanko').addEventListener('close', () => ($('sanko-frame').src = 'about:blank'));
   $('btn-reset-results').addEventListener('click', () => {
     if (!globalThis.confirm(`「${currentSetName()}」の合格・不合格の記録をすべて消しますか?`)) return;
     for (const w of setWords()) {
