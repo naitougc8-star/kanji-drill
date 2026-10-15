@@ -329,3 +329,16 @@ textarea { min-height: 140px; resize: vertical; }
 .answer-box b { color: var(--accent); }
 .answer-box .given { color: var(--muted); }
 .answer-box small { color: var(--muted); font-size: 14px; }
+
+/* 百人一首: 初句のかな、続きの入力欄、答え(漢字・かな・あなたの回答) */
+.reading-kana { text-align: center; font-size: clamp(22px, 4vw, 32px); margin: -4px 0 4px; letter-spacing: 0.05em; }
+.kana-box { display: flex; justify-content: center; margin: 16px 0 8px; }
+.kana-input { width: min(100%, 44em); min-height: 64px; font-size: clamp(20px, 3.4vw, 28px); padding: 8px 16px; border-radius: 10px; border: 2px solid var(--line); background: var(--card); color: var(--text); }
+.kana-input:focus { outline: none; border-color: var(--accent); }
+.answer-box .poem-text, .answer-box .poem-kana { padding: 4px 0; }
+.answer-box .poem-kana b { color: var(--text); }
+.answer-box .poem-text b { color: var(--text); }
+.answer-box .miss { color: var(--ng); text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 4px; }
+.answer-box .mine { margin-top: 12px; text-align: left; }
+.answer-box .mine-text { border: 1px solid var(--line); border-radius: 8px; padding: 6px 14px; font-size: 22px; background: var(--btn); }
+.answer-box .mine-label { font-size: 14px; color: var(--muted); margin-top: 2px; }

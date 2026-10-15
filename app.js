@@ -12,7 +12,7 @@ import * as storage from './storage.js';
 import { migrate, wordsOf, photoCount, addWords, groupsOf, createSet, deleteSet } from './sets.js';
 import { makeBackup, backupFileName, parseBackup, mergeBackup, dataSize, formatSize, STORAGE_LIMIT } from './backup.js';
 import { KIND_LABEL, kindOf, detectKind, isHeaderText, yomiWord, yomiParts } from './kinds.js';
-import { matchPoems, poemByNo } from './hyakunin.js';
+import { matchPoems, poemByNo, poemParts, checkKana, normalizeKana } from './hyakunin.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -1102,7 +1102,7 @@ async function renderQuestion() {
   if (kind === 'yomi') {
     ctx.textContent = '読みを、ひらがなで書きましょう';
   } else if (kind === 'hyakunin') {
-    ctx.textContent = '百人一首: 続きを思い出して、紙やノートに書いてから「答えを見る」を押しましょう';
+    ctx.textContent = '百人一首: 続きを、下の入力欄に「ひらがな」で入力しましょう';
   } else if (w.before || w.after) {
     const blank = document.createElement('span');
     blank.className = 'blank';
@@ -1115,8 +1115,16 @@ async function renderQuestion() {
   $('answer').hidden = true;
   $('tools').hidden = false;
   for (const id of ['btn-undo', 'btn-clear', 'btn-clear-all']) $(id).hidden = kind === 'hyakunin';
-  $('btn-judge').textContent = kind === 'hyakunin' ? '答えを見る' : '判定する';
   $('btn-judge').disabled = false;
+  // 百人一首: 初句のかなを添え、続きはひらがなで入力する
+  const p = kind === 'hyakunin' ? poemParts(w.word, w.reading, w.before) : null;
+  $('reading-kana').hidden = !p;
+  $('reading-kana').textContent = p ? `${p.givenKana}${p.hint ? ' ' + p.hint : ''} …` : '';
+  $('kana-box').hidden = !p;
+  const input = $('kana-input');
+  input.value = '';
+  input.disabled = false;
+  if (p) input.focus();
 
   // 書くマス。読みの問題は、答えの読みのひらがな 1 字ずつ(送りがななど、語と同じかなは書かない)
   let segs;
@@ -1218,16 +1226,26 @@ async function onJudge() {
     $('btn-judge').disabled = false;
     if (pads.some((c) => c.tmpl === undefined)) return onJudge();
   }
-  current.judged = true;
-  $('tools').hidden = true;
   const w = current.word;
   const kind = kindOf(w);
-  showAnswer(w);
-  $('selfcheck-text').textContent =
-    kind === 'hyakunin' ? '続きを正しく書けましたか?' : 'お手本データがない字です。正しく書けましたか?';
+  // 百人一首: 入力したかなを、正しいかなと 1 字ずつ比べる
+  let check = null;
+  if (kind === 'hyakunin') {
+    const input = $('kana-input');
+    if (!normalizeKana(input.value)) {
+      input.focus();
+      return;
+    }
+    const p = poemParts(w.word, w.reading, w.before);
+    check = checkKana(p.restKana, input.value, p.hint);
+    input.disabled = true;
+  }
+  current.judged = true;
+  $('tools').hidden = true;
+  showAnswer(w, check);
   const reasons = [];
-  let allOk = true;
-  let needSelf = kind === 'hyakunin'; // 百人一首は、答えを見て自己採点
+  let allOk = check ? check.pass : true;
+  let needSelf = false;
   for (const cell of pads) {
     cell.pad.locked = true;
     if (!cell.tmpl) {
@@ -1277,8 +1295,12 @@ async function onJudge() {
   updateVerdict();
 }
 
-/** 答えを表示する(読み: 答えの読み、百人一首: 歌。初句は薄く)。書き取りは、マスの横のお手本が答え */
-function showAnswer(w) {
+/**
+ * 答えを表示する。書き取りは、マスの横のお手本が答え。
+ * - 読み: 答えの読み
+ * - 百人一首: 上の段に漢字の歌、下の段にかなの歌(違っていた字を赤)、その下に入力した答え。初句は薄く
+ */
+function showAnswer(w, check = null) {
   const box = $('answer');
   box.textContent = '';
   const kind = kindOf(w);
@@ -1292,18 +1314,53 @@ function showAnswer(w) {
     b.textContent = p.write;
     box.append(`答え: ${w.word} → ${p.head}`, b, p.tail);
   } else {
-    const poem = poemByNo(w.no);
-    const ku = poem ? poem.ku : w.word.split(' ');
-    const first = document.createElement('span');
-    first.className = 'given';
-    first.textContent = ku[0];
-    const rest = document.createElement('b');
-    rest.textContent = ku.slice(1).join(' ');
-    box.append(first, ' ', rest);
-    if (poem) {
+    const p = poemParts(w.word, w.reading, w.before);
+    const line = (cls, given, rest) => {
+      const d = document.createElement('div');
+      d.className = cls;
+      const g = document.createElement('span');
+      g.className = 'given';
+      g.textContent = given;
+      d.append(g, ' ', rest);
+      return d;
+    };
+    // 上の段: 漢字の歌
+    const text = document.createElement('b');
+    text.textContent = p.restText.join(' ');
+    const top = line('poem-text', p.givenText, text);
+    if (w.no) {
       const no = document.createElement('small');
-      no.textContent = `(${poem.no} 番)`;
-      box.append(' ', no);
+      no.textContent = `(${w.no} 番)`;
+      top.append(' ', no);
+    }
+    // 下の段: かなの歌(入力と違っていた字を赤で)
+    const kana = document.createElement('b');
+    if (check) {
+      check.ku.forEach((ku, i) => {
+        if (i) kana.append(' ');
+        for (const { ch, ok } of ku) {
+          if (ok) kana.append(ch);
+          else {
+            const m = document.createElement('span');
+            m.className = 'miss';
+            m.textContent = ch;
+            kana.appendChild(m);
+          }
+        }
+      });
+    } else kana.textContent = p.restKana.join(' ');
+    box.append(top, line('poem-kana', p.givenKana, kana));
+    if (check) {
+      const mine = document.createElement('div');
+      mine.className = 'mine';
+      const v = document.createElement('div');
+      v.className = 'mine-text';
+      v.textContent = $('kana-input').value.trim() || check.input; // 入力したとおりに(空白も)
+      const label = document.createElement('div');
+      label.className = 'mine-label';
+      label.textContent = 'あなたの回答';
+      mine.append(v, label);
+      box.append(mine);
     }
   }
   box.dataset.kind = kind;
@@ -1632,6 +1689,13 @@ function init() {
   $('btn-clear').addEventListener('click', onClear);
   $('btn-clear-all').addEventListener('click', onClearAll);
   $('btn-judge').addEventListener('click', onJudge);
+  // 百人一首の入力欄: Enter で判定(かな漢字変換の確定の Enter は除く)
+  $('kana-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) {
+      e.preventDefault();
+      onJudge();
+    }
+  });
   $('btn-self-ok').addEventListener('click', () => onSelf(true));
   $('btn-self-ng').addEventListener('click', () => onSelf(false));
   $('btn-override').addEventListener('click', onOverride);

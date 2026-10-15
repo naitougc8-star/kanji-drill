@@ -185,3 +185,71 @@ export function matchPoems(text) {
     .sort((a, b) => a.dist - b.dist || b.hint - a.hint || a.poem.no - b.poem.no)
     .map(({ poem, prompt, dist }) => ({ poem, prompt, dist }));
 }
+
+// ---------- 答え合わせ(続きを、ひらがなで入力する) ----------
+
+/** カタカナ → ひらがなにし、空白・句読点を除く */
+export function normalizeKana(s) {
+  return (s || '')
+    .replace(/[ァ-ヶ]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60))
+    .replace(/[\s　、。,.・「」]/g, '');
+}
+
+/**
+ * 出題する歌を、見せる部分(初句と手がかりの字)と答える部分(第 2 句から)に分ける。
+ * 保存した語(word = 表記、reading = かな、before = 出題で見せる文字)から作るので、語の一覧で直した歌でもよい。
+ * @returns {{givenText: string, givenKana: string, hint: string, restText: string[], restKana: string[]}}
+ */
+export function poemParts(word, reading, prompt = '') {
+  const ku = (word || '').split(/\s+/).filter(Boolean);
+  const kana = (reading || '').split(/\s+/).filter(Boolean);
+  const hint = (prompt || '').split(/\s+/).slice(1).join('');
+  return { givenText: ku[0] || '', givenKana: kana[0] || '', hint, restText: ku.slice(1), restKana: kana.slice(1) };
+}
+
+/**
+ * 入力した続き(ひらがな)を、正しいかなと 1 字ずつ比べる。
+ * 歴史的仮名遣いのまま比べる(「ぢ」を「じ」、「を」を「お」と書くと違う字になる)。
+ * 字の抜け・余分があっても、その後ろの字がずれないように、編集距離の対応で比べる。
+ * @param {string[]} restKana 正しいかな(句ごと)
+ * @param {string} input 入力
+ * @param {string} hint 出題で見せた、第 2 句の書き始めの字(例: や)。入力で省いてもよい
+ * @returns {{pass: boolean, input: string, ku: {ch: string, ok: boolean}[][]}} ku: 句ごと・字ごとの正誤
+ */
+export function checkKana(restKana, input, hint = '') {
+  const expected = [...restKana.join('')];
+  let typed = normalizeKana(input);
+  const h = normalizeKana(hint);
+  if (h && expected.join('').startsWith(h) && !typed.startsWith(h)) typed = h + typed;
+  const got = [...typed];
+  const n = expected.length, m = got.length;
+  const D = Array.from({ length: n + 1 }, (_, i) => {
+    const row = new Array(m + 1).fill(0);
+    row[0] = i;
+    return row;
+  });
+  for (let j = 0; j <= m; j++) D[0][j] = j;
+  for (let i = 1; i <= n; i++) {
+    for (let j = 1; j <= m; j++) {
+      D[i][j] = Math.min(D[i - 1][j] + 1, D[i][j - 1] + 1, D[i - 1][j - 1] + (expected[i - 1] === got[j - 1] ? 0 : 1));
+    }
+  }
+  // 対応をたどって、正しく書けた字に印を付ける
+  const ok = new Array(n).fill(false);
+  let i = n, j = m;
+  while (i > 0 && j > 0) {
+    if (expected[i - 1] === got[j - 1] && D[i][j] === D[i - 1][j - 1]) {
+      ok[i - 1] = true;
+      i--;
+      j--;
+    } else if (D[i][j] === D[i - 1][j - 1] + 1) {
+      i--;
+      j--;
+    } else if (D[i][j] === D[i - 1][j] + 1) i--;
+    else j--;
+  }
+  const ku = [];
+  let k = 0;
+  for (const part of restKana) ku.push([...part].map((ch) => ({ ch, ok: ok[k++] })));
+  return { pass: D[n][m] === 0, input: typed, ku };
+}

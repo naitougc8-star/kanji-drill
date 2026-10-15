@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
-import { POEMS, matchPoems, editDistance } from '../../hyakunin.js';
+import { POEMS, matchPoems, editDistance, poemParts, checkKana, normalizeKana } from '../../hyakunin.js';
 import { detectKind, isYomiText, yomiWord, yomiParts, isHeaderText, kindOf } from '../../kinds.js';
 import { addWords } from '../../sets.js';
 
@@ -109,5 +109,50 @@ describe('ひらがなのお手本', () => {
     for (let cp = 0x3041; cp <= 0x3096; cp++) expect(d[cp.toString(16)], String.fromCharCode(cp)).toBeTruthy();
     expect(d['3055']).toHaveLength(3); // さ
     expect(d['306a']).toHaveLength(4); // な
+  });
+});
+
+describe('百人一首の答え合わせ(ひらがなで入力)', () => {
+  const p12 = POEMS[11];
+  const parts = () => poemParts(p12.text, p12.kana, '天つ風');
+
+  it('歌を、見せる初句と答える続きに分ける', () => {
+    const p = parts();
+    expect(p.givenText).toBe('天つ風');
+    expect(p.givenKana).toBe('あまつかぜ');
+    expect(p.restKana).toEqual(['くものかよひぢ', 'ふきとぢよ', 'をとめのすがた', 'しばしとどめむ']);
+    expect(poemParts(POEMS[10].text, POEMS[10].kana, 'わたの原 や').hint).toBe('や');
+  });
+
+  it('正しく入力すれば合格(空白・カタカナ・句読点はかまわない)', () => {
+    const p = parts();
+    expect(checkKana(p.restKana, 'くものかよひぢ ふきとぢよ をとめのすがた しばしとどめむ').pass).toBe(true);
+    expect(checkKana(p.restKana, 'くものかよひぢふきとぢよ、をとめのすがたしばしとどめむ').pass).toBe(true);
+    expect(checkKana(p.restKana, 'クモノカヨヒヂ フキトヂヨ ヲトメノスガタ シバシトドメム').pass).toBe(true);
+  });
+
+  it('違った字(ぢ→じ、を→お)だけに印が付く', () => {
+    const p = parts();
+    const r = checkKana(p.restKana, 'くものかよひぢ ふきとじよ おとめのすがた しばしとどめむ');
+    expect(r.pass).toBe(false);
+    const miss = r.ku.map((ku) => ku.filter((c) => !c.ok).map((c) => c.ch).join(''));
+    expect(miss).toEqual(['', 'ぢ', 'を', '']);
+  });
+
+  it('字が抜けても、後ろの字はずれずに比べる', () => {
+    const p = parts();
+    const r = checkKana(p.restKana, 'くものかよひぢ ふきとぢ をとめのすがた しばしとどめむ'); // 「よ」が抜けた
+    const miss = r.ku.map((ku) => ku.filter((c) => !c.ok).map((c) => c.ch).join(''));
+    expect(miss).toEqual(['', 'よ', '', '']);
+  });
+
+  it('出題で見せた手がかりの字(や)は、入力で省いてもよい', () => {
+    const p = poemParts(POEMS[10].text, POEMS[10].kana, 'わたの原 や');
+    expect(checkKana(p.restKana, 'そしまかけて こぎいでぬと ひとにはつげよ あまのつりぶね', p.hint).pass).toBe(true);
+    expect(checkKana(p.restKana, 'やそしまかけて こぎいでぬと ひとにはつげよ あまのつりぶね', p.hint).pass).toBe(true);
+  });
+
+  it('入力のかなをそろえる', () => {
+    expect(normalizeKana(' ヲトメ、の すがた。')).toBe('をとめのすがた');
   });
 });

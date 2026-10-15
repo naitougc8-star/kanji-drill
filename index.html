@@ -202,8 +202,12 @@
         <button type="button" id="btn-quit" class="btn small">やめる</button>
       </div>
       <div id="reading" class="reading"></div>
+      <div id="reading-kana" class="reading-kana" hidden></div>
       <div id="context" class="context"></div>
       <div id="cells" class="cells"></div>
+      <div id="kana-box" class="kana-box" hidden>
+        <input id="kana-input" class="kana-input" placeholder="続きを、ひらがなで入力" aria-label="続き(ひらがな)" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done">
+      </div>
       <div id="tools" class="row tools">
         <button type="button" id="btn-undo" class="btn">一画戻す</button>
         <button type="button" id="btn-clear" class="btn">消す</button>
