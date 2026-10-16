@@ -9,6 +9,15 @@ import { POEMS } from '../../hyakunin.js';
 
 const DEVICES = ['iPad (gen 11)', 'iPad (gen 11) landscape', 'iPad Pro 11', 'iPad Mini', 'iPhone 15', 'iPhone 15 landscape'];
 
+
+/** アプリの確認の窓に答える(文字を渡すと、名前の入力欄に入れてから OK) */
+async function confirmAsk(page, text = null) {
+  await expect(page.locator('#ask')).toBeVisible();
+  if (text !== null) await page.locator('#ask-input').fill(text);
+  await page.locator('#ask-ok').click();
+  await expect(page.locator('#ask')).toBeHidden();
+}
+
 /** 書き取り・読み・百人一首を 1 語ずつ入れたバックアップ(ほかの端末で書き出したファイルの代わり) */
 function backupFile() {
   const now = Date.now();
@@ -89,9 +98,9 @@ for (const name of DEVICES) {
     await expectNoHorizontalScroll(page, '設定画面');
 
     // バックアップを読み込む(ほかの端末から送ったファイル)
-    page.on('dialog', (d) => d.accept());
     await expect(page.locator('#fold-backup')).toHaveAttribute('open', ''); // 初めは開いている
     await page.setInputFiles('#import-replace', backupFile());
+    await confirmAsk(page);
     await expect(page.locator('#backup-status')).toContainText('置き換えました');
     await expect(page.locator('#btn-start')).toHaveText('全問出題する(3 語)');
 

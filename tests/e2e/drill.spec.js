@@ -1,5 +1,14 @@
 import { test, expect } from '@playwright/test';
 
+
+/** アプリの確認の窓に答える(文字を渡すと、名前の入力欄に入れてから OK) */
+async function confirmAsk(page, text = null) {
+  await expect(page.locator('#ask')).toBeVisible();
+  if (text !== null) await page.locator('#ask-input').fill(text);
+  await page.locator('#ask-ok').click();
+  await expect(page.locator('#ask')).toBeHidden();
+}
+
 /** コンソールのエラー・失敗した通信・外部への通信を集める */
 function watch(page, baseURL) {
   const problems = [];
@@ -379,8 +388,8 @@ test('間違えた回数で色分け(黄・オレンジ・赤)、何回目で合
   await expect(row('山')).toHaveClass(/res-fail1/);
 
   // 成績をリセット
-  page.once('dialog', (d) => d.accept());
   await page.click('#btn-reset-results');
+  await confirmAsk(page);
   await expect(page.locator('#word-list li[data-result="none"]')).toHaveCount(3);
 
   expect(problems, problems.join('\n')).toEqual([]);
@@ -461,8 +470,8 @@ test('テスト(出題の範囲)ごとに語をまとめる: 作る・名前を�
   await expect(page.locator('#word-list li[data-word="海"] .res')).toHaveText('○ 2 回目で合格');
 
   // 名前を変える
-  page.once('dialog', (d) => d.accept('1 学期 中間テスト'));
   await page.click('#btn-set-rename');
+  await confirmAsk(page, '1 学期 中間テスト');
   await expect(page.locator('#set-select option')).toHaveText(['1 学期 中間テスト(1 語)']);
   await expect(page.locator('#set-name-inline')).toHaveText('「1 学期 中間テスト」');
 
@@ -478,8 +487,8 @@ test('テスト(出題の範囲)ごとに語をまとめる: 作る・名前を�
   await expect(page.locator('#set-info')).toContainText('4 語(写真 1 枚)');
 
   // 新しいテストを作ると、そちらに切り替わり、語の一覧は空
-  page.once('dialog', (d) => d.accept('1 学期 期末テスト'));
   await page.click('#btn-set-new');
+  await confirmAsk(page, '1 学期 期末テスト');
   await expect(page.locator('#set-select')).toHaveValue(/.+/);
   await expect(page.locator('#set-select option:checked')).toHaveText('1 学期 期末テスト(0 語)');
   await expect(page.locator('#word-list li')).toHaveCount(0);
@@ -509,8 +518,8 @@ test('テスト(出題の範囲)ごとに語をまとめる: 作る・名前を�
 
   // 期末テストを削除すると、その語も消える
   await page.locator('#set-select').selectOption({ label: '1 学期 期末テスト(1 語)' });
-  page.once('dialog', (d) => d.accept());
   await page.click('#btn-set-delete');
+  await confirmAsk(page);
   await expect(page.locator('#set-select option')).toHaveText(['1 学期 中間テスト(4 語)']);
   const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('kakitori-drill.v1')).words.map((w) => w.word));
   expect(stored).not.toContain('空');
@@ -550,8 +559,8 @@ test('バックアップ: iPad で書き出したファイルを iPhone で読�
   const ipad = await open();
   {
     const p = ipad.page;
-    p.once('dialog', (d) => d.accept('中間テスト'));
     await p.click('#btn-set-rename');
+    await confirmAsk(p, '中間テスト');
     for (const [w, r] of [['山', 'やま'], ['川', 'かわ']]) {
       await p.fill('#add-word', w);
       await p.fill('#add-reading', r);
@@ -589,8 +598,8 @@ test('バックアップ: iPad で書き出したファイルを iPhone で読�
   await expect(ipad.page.locator('#set-select option')).toHaveText(['中間テスト(2 語)']); // 同じテストは 1 つにまとまる
 
   // 置き換える(確認あり)
-  ipad.page.once('dialog', (d) => d.accept());
   await ipad.page.setInputFiles('#import-replace', fromIpad);
+  await confirmAsk(ipad.page);
   await expect(ipad.page.locator('#backup-status')).toContainText('置き換えました');
   await expect(ipad.page.locator('#word-list li[data-word="川"] .res')).toHaveText('未出題');
 

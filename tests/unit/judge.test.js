@@ -177,10 +177,10 @@ describe('模擬の手書きによる検証', () => {
     for (let i = 1; i < order.length; i++) expect(sum[order[i]]).toBeLessThanOrEqual(sum[order[i - 1]]);
   });
 
-  it('紛らわしいペア(画数が違う): 100% 不合格', () => {
+  it('紛らわしいペア(画数が違う): 甘い・標準・シビアでは 100% 不合格(超甘いは画数を見ない)', () => {
     for (const [a, b] of CONFUSABLE_COUNT) {
       for (const [x, y] of [[a, b], [b, a]]) {
-        for (const level of Object.keys(LEVELS)) {
+        for (const level of Object.keys(LEVELS).filter((l) => l !== 'superLenient')) {
           expect(falsePass(x, y, level, 50, 3), `${x}→${y} ${level}`).toBe(0);
         }
       }
@@ -213,7 +213,7 @@ describe('書いた筆画の手直し(画数が多いとき)', () => {
 
   it('点ではない余分な画は除かず、離れた 2 画はつながない(画数が違うまま)', () => {
     const extra = [t[0], t[1], t[2], [[40, 200], [120, 200]]];
-    expect(judge(extra, loadTemplate('三'), { level: 'superLenient', char: '三' }).reasons[0].text).toContain('画数が違います');
+    expect(judge(extra, loadTemplate('三'), { level: 'lenient', char: '三' }).reasons[0].text).toContain('画数が違います');
   });
 });
 
@@ -247,10 +247,64 @@ describe('実際の手書きで不合格になっていた例(超甘い)', () =>
     expect(judge(u, loadTemplate('道'), { level: 'standard', char: '道' }).reasons[0].text).toContain('画数が違います');
   });
 
-  it('角で分けても、お手本で続いていない 2 画には当てない(日 を分けて 目 にしない)', () => {
+  it('角で分けても、お手本で続いていない 2 画には当てない(甘いで、日 を分けて 目 にしない)', () => {
     const r = rng(9);
     let pass = 0;
-    for (let k = 0; k < 50; k++) if (judge(simulate(loadTemplate('日'), NOISE.normal, r), loadTemplate('目'), { level: 'superLenient', char: '目' }).pass) pass++;
+    for (let k = 0; k < 50; k++) if (judge(simulate(loadTemplate('日'), NOISE.normal, r), loadTemplate('目'), { level: 'lenient', char: '目' }).pass) pass++;
     expect(pass).toBe(0);
+  });
+});
+
+describe('超甘い: 画数は見ずに、字の形で判定する', () => {
+  /** 2 画をつなぐか、1 画を 2 つに分けて、画数を変える */
+  function alter(u, r) {
+    const v = u.slice();
+    if (r() < 0.5 && v.length > 1) {
+      const i = Math.floor(r() * (v.length - 1));
+      v.splice(i, 2, [...v[i], ...v[i + 1]]);
+    } else {
+      const i = Math.floor(r() * v.length), s = v[i];
+      if (s.length > 6) v.splice(i, 1, s.slice(0, Math.floor(s.length / 2) + 1), s.slice(Math.floor(s.length / 2)));
+    }
+    return v;
+  }
+  const chars = [...GRADE12].slice(0, 80);
+
+  it('正しい字なら、画数が違っても 90% 以上が合格(「ふつう」のゆらぎ)', () => {
+    const r = rng(31);
+    let pass = 0, n = 0;
+    for (const ch of chars) {
+      const t = loadTemplate(ch);
+      const u = alter(simulate(t, NOISE.normal, r), r);
+      if (u.length === t.length) continue;
+      n++;
+      if (judge(u, t, { level: 'superLenient', char: ch }).pass) pass++;
+    }
+    console.log(`超甘い/画数違いの正しい字 合格率 ${((pass / n) * 100).toFixed(1)}%`);
+    expect(pass / n).toBeGreaterThanOrEqual(0.9);
+  });
+
+  it('違う字は、画数が違えば 3% 以下しか合格しない', () => {
+    const r = rng(32);
+    let pass = 0, n = 0;
+    for (let k = 0; k < 300; k++) {
+      const x = chars[Math.floor(r() * chars.length)], y = chars[Math.floor(r() * chars.length)];
+      if (x === y || loadTemplate(x).length === loadTemplate(y).length) continue;
+      n++;
+      if (judge(simulate(loadTemplate(x), NOISE.normal, r), loadTemplate(y), { level: 'superLenient', char: y }).pass) pass++;
+    }
+    console.log(`超甘い/違う字 誤合格 ${((pass / n) * 100).toFixed(1)}% (${n} 回)`);
+    expect(pass / n).toBeLessThanOrEqual(0.03);
+  });
+
+  it('形の判定で合格したときは、そのことを表示する。不合格なら理由に画数も出す', () => {
+    const t = loadTemplate('口');
+    const [a, b, c] = toTemplate(t).map((s) => s.map(([x, y]) => [x * 3, y * 3]));
+    // 口 を 2 画で(1 画目と 3 画目をつなげて L の形に)
+    const ok = judge([[...a, ...c], b], t, { level: 'superLenient', char: '口' });
+    expect(ok.pass).toBe(true);
+    expect(ok.notes.join()).toContain('画数は見ずに、字の形で判定しました');
+    const ng = judge([[[0, 0], [300, 300]]], t, { level: 'superLenient', char: '口' });
+    expect(ng.reasons[0].text).toContain('字の形がお手本と違います');
   });
 });

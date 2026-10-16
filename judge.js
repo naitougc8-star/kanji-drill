@@ -5,9 +5,10 @@
 
 /** 厳しさごとのしきい値。数値の根拠は README の「判定のしきい値」を参照。 */
 export const LEVELS = {
-  // 超甘い: 形のゆれをさらに大きく許す(画数・明らかに違う形は不合格のまま)。途中で離した筆画はつなぎ、続けて書いた筆画は角で分ける。
+  // 超甘い: 形のゆれをさらに大きく許す。途中で離した筆画はつなぎ、続けて書いた筆画は角で分ける。
+  //   それでも画数が違うときは、画数は見ずに字の形(点の集まり)で判定する(shapeOnly: 形の違いの許容)。
   //   平行な 2 本の長さの関係は見ない(横画の長さだけが違う似た字(末・未、士・土)は見分けない)。点は長い線で書いてもよい
-  superLenient: { label: '超甘い', mean: 0.3, max: 0.62, end: 0.4, lenLo: 0.36, lenHi: 2.8, lenAbs: 0.4, angle: 58, aspect: 1.0, relLen: null, maxRot: 35, maxScale: 2.2, rule: 1.4, group: 0.6, merge: true, split: true, splitRelLen: 0.5, dotLine: true },
+  superLenient: { label: '超甘い', mean: 0.3, max: 0.62, end: 0.4, lenLo: 0.36, lenHi: 2.8, lenAbs: 0.4, angle: 58, aspect: 1.0, relLen: null, maxRot: 35, maxScale: 2.2, rule: 1.4, group: 0.6, merge: true, split: true, splitRelLen: 0.5, dotLine: true, shapeOnly: 0.1 },
   // 甘い: 字の形のゆれ(位置・長さ・角度)は大きく許し、似た字を見分けるチェック(長さの関係・字ごとのルール)は標準と同じくらいに残す。
   //   途中で離した筆画はつなぎ、続けて書いた筆画は角で分ける
   lenient: { label: '甘い', mean: 0.2, max: 0.42, end: 0.26, lenLo: 0.5, lenHi: 2.0, lenAbs: 0.26, angle: 38, aspect: 0.65, relLen: 0.5, maxRot: 25, maxScale: 1.7, rule: 1.2, group: 0.5, merge: true, split: true },
@@ -423,6 +424,18 @@ export function judge(user, template, opts = {}) {
     if (found) return found;
   }
   if (strokesIn.length !== tmpl.length) {
+    // 超甘い: 画数は見ずに、字の形がお手本にとても近ければ合格
+    if (th.shapeOnly) {
+      const d = shapeDistance(written, tmpl, th);
+      result.shape = d;
+      if (Math.max(d.missing, d.extra) <= th.shapeOnly) {
+        result.pass = true;
+        result.notes.push(`画数は見ずに、字の形で判定しました(正解 ${tmpl.length} 画 / あなた ${written.length} 画)`);
+      } else {
+        result.reasons.push({ stroke: null, text: `字の形がお手本と違います(画数も違います: 正解 ${tmpl.length} 画 / あなた ${written.length} 画)` });
+      }
+      return result;
+    }
     result.reasons.push({ stroke: null, text: `画数が違います(正解 ${tmpl.length} 画 / あなた ${written.length} 画)` });
     return result;
   }
@@ -504,6 +517,78 @@ export function cornersOf(s, size) {
     if (!out.some((c) => c.at === at)) out.push({ at, turn: turn[j] });
   }
   return out;
+}
+
+/** 筆画を、長さ step ごとの点にする。点ごとに、線の向き(0〜180°。書く向きは見ない)も持たせる */
+function samplePoints(strokes, step) {
+  const pts = [];
+  for (const s of strokes) {
+    if (s.length === 1) { pts.push([s[0][0], s[0][1], null]); continue; }
+    for (let i = 1; i < s.length; i++) {
+      const [a, b] = [s[i - 1], s[i]];
+      const dir = Math.atan2(b[1] - a[1], b[0] - a[0]);
+      const n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / step));
+      for (let k = i === 1 ? 0 : 1; k <= n; k++) pts.push([a[0] + ((b[0] - a[0]) * k) / n, a[1] + ((b[1] - a[1]) * k) / n, dir]);
+    }
+  }
+  return pts;
+}
+
+const DIR_WEIGHT = 0.08; // 向きの違い(直角で 1)を、距離に直すときの重み(字の大きさ 1 に対して)
+
+/** 2 点の違い: 位置の距離と、線の向きの違い(書く向きは見ない) */
+function pointGap(p, q) {
+  let d2 = (p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2;
+  if (p[2] !== null && q[2] !== null) {
+    const t = Math.abs(Math.sin(p[2] - q[2])); // 平行なら 0、直角なら 1
+    d2 += (DIR_WEIGHT * t) ** 2;
+  }
+  return d2;
+}
+
+/** a の各点に、b のいちばん近い点(番号と距離) */
+function nearest(a, b) {
+  return a.map((p) => {
+    let best = Infinity, at = 0;
+    for (let j = 0; j < b.length; j++) {
+      const d = pointGap(p, b[j]);
+      if (d < best) { best = d; at = j; }
+    }
+    return { at, d: Math.sqrt(best) };
+  });
+}
+
+function percentile(arr, q) {
+  const s = arr.slice().sort((x, y) => x - y);
+  return s[Math.min(s.length - 1, Math.floor(s.length * q))];
+}
+
+/**
+ * 字の形の近さ(画数・書き順・書く向きは見ない)。字全体を枠に合わせ、さらに傾き・ゆがみを近い点どうしで直してから、
+ * 点の集まりどうしを比べる(点の位置と、線の向き)。
+ * - missing: お手本の点のうち、書いた線から遠い点の違い(90% 点)。大きいと、お手本の線が書かれていない
+ * - extra:   書いた点のうち、お手本の線から遠い点の違い(90% 点)。大きいと、お手本にない線を書いている
+ * - mean:    両方向の平均
+ */
+export function shapeDistance(user, template, th = {}) {
+  const tmpl = toTemplate(template);
+  const N = normalizePair(user, tmpl);
+  const tp = samplePoints(N.tRaw, 0.012);
+  let us = N.uRaw;
+  // 近い点どうしの対応で、字全体の傾き・ゆがみ(アフィン変換)を数回直す(ICP)
+  for (let it = 0; it < 4; it++) {
+    const up = samplePoints(us, 0.012);
+    const nn = nearest(up, tp);
+    const fit = fitAffine(up.map((p) => [p[0], p[1]]), nn.map((x) => [tp[x.at][0], tp[x.at][1]]), AFFINE_RIDGE * 2);
+    if (!fit) break;
+    const [s1, s2] = fit.scale;
+    if (Math.abs(fit.rot) > (th.maxRot ?? 30) || s2 <= 0 || s1 / s2 > (th.maxScale ?? 2)) break;
+    us = us.map((st) => applyAffine(st, fit.m));
+  }
+  const up = samplePoints(us, 0.012);
+  const dt = nearest(tp, up).map((x) => x.d), du = nearest(up, tp).map((x) => x.d);
+  const avg = (a) => a.reduce((s, x) => s + x, 0) / a.length;
+  return { missing: percentile(dt, 0.9), extra: percentile(du, 0.9), mean: (avg(dt) + avg(du)) / 2 };
 }
 
 const SPLIT_MAX_TRIES = 300;

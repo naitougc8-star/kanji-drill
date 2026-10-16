@@ -255,6 +255,18 @@
     </section>
   </main>
 
+  <!-- 確認・名前の入力(iPad の Safari では、ブラウザの確認の窓を「表示しない」にすると、何も聞かずに「キャンセル」になるため、自前の窓にする) -->
+  <dialog id="ask" class="ask" aria-labelledby="ask-text">
+    <form method="dialog">
+      <p id="ask-text" class="ask-text"></p>
+      <input id="ask-input" class="ask-input" autocomplete="off" hidden>
+      <div class="row ask-buttons">
+        <button type="button" id="ask-cancel" class="btn" value="cancel">キャンセル</button>
+        <button type="submit" id="ask-ok" class="btn primary" value="ok">OK</button>
+      </div>
+    </form>
+  </dialog>
+
   <!-- 百人一首の解説(全日本かるた協会「一日一首」のページを表示する) -->
   <dialog id="sanko" class="sanko" aria-labelledby="sanko-title">
     <div class="sanko-head">

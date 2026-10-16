@@ -96,6 +96,37 @@ function showMessage(text, kind = 'error') {
   $('message').hidden = false;
 }
 
+/**
+ * 確認の窓(OK / キャンセル)。input に文字を渡すと、名前の入力欄も出す。
+ * ブラウザの confirm / prompt は、iPad の Safari で「このページのダイアログを表示しない」を選ぶと、
+ * 何も聞かずにキャンセルになる(成績のリセットなどが動かなくなる)ので使わない。
+ * @returns {Promise<boolean | string | null>} 確認: true / false。入力: 入力した文字 / null(キャンセル)
+ */
+function ask(text, input = null) {
+  const dlg = $('ask');
+  const field = $('ask-input');
+  $('ask-text').textContent = text;
+  field.hidden = input === null;
+  field.value = input ?? '';
+  return new Promise((resolve) => {
+    const done = (ok) => {
+      dlg.removeEventListener('close', onClose);
+      $('ask-cancel').onclick = null;
+      if (dlg.open) dlg.close();
+      resolve(input === null ? ok : ok ? field.value : null);
+    };
+    const onClose = () => done(dlg.returnValue === 'ok');
+    dlg.returnValue = '';
+    dlg.addEventListener('close', onClose);
+    $('ask-cancel').onclick = () => done(false);
+    dlg.showModal();
+    if (input !== null) {
+      field.focus();
+      field.select();
+    } else $('ask-ok').focus();
+  });
+}
+
 function hideMessage() {
   $('message').hidden = true;
 }
@@ -729,8 +760,8 @@ function groupHead(g) {
   del.type = 'button';
   del.className = 'btn small';
   del.textContent = 'まとめて削除';
-  del.addEventListener('click', () => {
-    if (!globalThis.confirm(`${g.label}の ${g.words.length} 語を、このテストから削除しますか?`)) return;
+  del.addEventListener('click', async () => {
+    if (!(await ask(`${g.label}の ${g.words.length} 語を、このテストから削除しますか?`))) return;
     const ids = new Set(g.words.map((w) => w.id));
     state.words = state.words.filter((w) => !ids.has(w.id));
     persist();
@@ -954,8 +985,8 @@ function onSetChange() {
   renderWordList();
 }
 
-function onSetNew() {
-  const name = globalThis.prompt('新しいテストの名前(例: 1 学期 中間テスト)', `テスト ${state.sets.length + 1}`);
+async function onSetNew() {
+  const name = await ask('新しいテストの名前(例: 1 学期 中間テスト)', `テスト ${state.sets.length + 1}`);
   if (name === null) return;
   const set = createSet(state.sets, name);
   state.currentSet = set.id;
@@ -965,9 +996,9 @@ function onSetNew() {
   renderWordList();
 }
 
-function onSetRename() {
+async function onSetRename() {
   const set = state.sets.find((x) => x.id === state.currentSet);
-  const name = globalThis.prompt('テストの名前', set.name);
+  const name = await ask('テストの名前', set.name);
   if (name === null || !name.trim()) return;
   set.name = name.trim();
   set.updatedAt = Date.now();
@@ -975,9 +1006,9 @@ function onSetRename() {
   renderWordList();
 }
 
-function onSetDelete() {
+async function onSetDelete() {
   const n = setWords().length;
-  if (!globalThis.confirm(`「${currentSetName()}」と、その中の ${n} 語(成績も)を削除しますか? 元に戻せません。`)) return;
+  if (!(await ask(`「${currentSetName()}」と、その中の ${n} 語(成績も)を削除しますか? 元に戻せません。`))) return;
   const r = deleteSet(state.sets, state.words, state.currentSet);
   state.sets = r.sets;
   state.words = r.words;
@@ -1585,7 +1616,7 @@ async function onImport(e, mode) {
     const inc = parseBackup(await file.text());
     let message;
     if (mode === 'replace') {
-      const ok = globalThis.confirm(
+      const ok = await ask(
         `この端末のテストと語(テスト ${state.sets.length} 件・${state.words.length} 語)を、` +
           `ファイルの内容(テスト ${inc.sets.length} 件・${inc.words.length} 語)に置き換えますか? 元に戻せません。`,
       );
@@ -1754,8 +1785,8 @@ function init() {
   $('btn-sanko').addEventListener('click', openSanko);
   $('sanko-close').addEventListener('click', closeSanko);
   $('sanko').addEventListener('close', () => ($('sanko-frame').src = 'about:blank'));
-  $('btn-reset-results').addEventListener('click', () => {
-    if (!globalThis.confirm(`「${currentSetName()}」の合格・不合格の記録をすべて消しますか?`)) return;
+  $('btn-reset-results').addEventListener('click', async () => {
+    if (!(await ask(`「${currentSetName()}」の合格・不合格の記録をすべて消しますか?`))) return;
     for (const w of setWords()) {
       w.result = null;
       w.misses = 0;
