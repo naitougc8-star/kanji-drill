@@ -5,10 +5,11 @@
 
 /** 厳しさごとのしきい値。数値の根拠は README の「判定のしきい値」を参照。 */
 export const LEVELS = {
-  // 超甘い: 形のゆれをさらに大きく許す(画数・書き順・明らかに違う形は不合格のまま。横画の長さだけが違う似た字は通ることがある)
-  superLenient: { label: '超甘い', mean: 0.26, max: 0.54, end: 0.33, lenLo: 0.42, lenHi: 2.4, lenAbs: 0.33, angle: 48, aspect: 0.8, relLen: 0.6, maxRot: 30, maxScale: 1.9, rule: 1.4, group: 0.55 },
-  // 甘い: 字の形のゆれ(位置・長さ・角度)は大きく許し、似た字を見分けるチェック(長さの関係・字ごとのルール)は標準と同じくらいに残す
-  lenient: { label: '甘い', mean: 0.2, max: 0.42, end: 0.26, lenLo: 0.5, lenHi: 2.0, lenAbs: 0.26, angle: 38, aspect: 0.65, relLen: 0.5, maxRot: 25, maxScale: 1.7, rule: 1.2, group: 0.5 },
+  // 超甘い: 形のゆれをさらに大きく許す(画数・明らかに違う形は不合格のまま)。途中で離した筆画はつなぐ。
+  //   平行な 2 本の長さの関係は、はっきり逆のときだけ不合格(横画の長さだけが違う似た字(末・未、士・土)は通ることが多い)
+  superLenient: { label: '超甘い', mean: 0.3, max: 0.62, end: 0.4, lenLo: 0.36, lenHi: 2.8, lenAbs: 0.4, angle: 58, aspect: 1.0, relLen: 1.0, maxRot: 35, maxScale: 2.2, rule: 1.4, group: 0.6, merge: true },
+  // 甘い: 字の形のゆれ(位置・長さ・角度)は大きく許し、似た字を見分けるチェック(長さの関係・字ごとのルール)は標準と同じくらいに残す。途中で離した筆画はつなぐ
+  lenient: { label: '甘い', mean: 0.2, max: 0.42, end: 0.26, lenLo: 0.5, lenHi: 2.0, lenAbs: 0.26, angle: 38, aspect: 0.65, relLen: 0.5, maxRot: 25, maxScale: 1.7, rule: 1.2, group: 0.5, merge: true },
   standard: { label: '標準', mean: 0.15, max: 0.32, end: 0.21, lenLo: 0.58, lenHi: 1.7, lenAbs: 0.2, angle: 30, aspect: 0.55, relLen: 0.5, maxRot: 20, maxScale: 1.5, rule: 1.2, group: 0.5 },
   severe: { label: 'シビア', mean: 0.11, max: 0.25, end: 0.16, lenLo: 0.68, lenHi: 1.48, lenAbs: 0.15, angle: 22, aspect: 0.42, relLen: 0.35, maxRot: 15, maxScale: 1.4, rule: 1.0, group: 0.32 },
 };
@@ -400,17 +401,73 @@ export function judge(user, template, opts = {}) {
   const level = opts.level || DEFAULT_LEVEL;
   const th = opts.thresholds || LEVELS[level] || LEVELS[DEFAULT_LEVEL];
   const tmpl = toTemplate(template);
-  const strokesIn = (user || []).filter((s) => s && s.length > 0);
+  const written = (user || []).filter((s) => s && s.length > 0);
   const result = { pass: false, reasons: [], notes: [], assign: null, strokes: [], level };
 
-  if (strokesIn.length === 0) {
+  if (written.length === 0) {
     result.reasons.push({ stroke: null, text: '何も書かれていません' });
     return result;
   }
+  // 画数が多いときは、ちょんと触れただけの点を除き、(甘い判定では)途中で離した筆画をつなぐ
+  const tidy = tidyStrokes(written, tmpl.length, { merge: !!th.merge });
+  const strokesIn = tidy.strokes;
+  if (tidy.removed) result.notes.push(`触れただけの小さな点を ${tidy.removed} つ除いて判定しました`);
+  if (tidy.merged) result.notes.push(`途中で離れた筆画を ${tidy.merged} か所つないで判定しました`);
   if (strokesIn.length !== tmpl.length) {
-    result.reasons.push({ stroke: null, text: `画数が違います(正解 ${tmpl.length} 画 / あなた ${strokesIn.length} 画)` });
+    result.reasons.push({ stroke: null, text: `画数が違います(正解 ${tmpl.length} 画 / あなた ${written.length} 画)` });
     return result;
   }
+  const out = judgeStrokes(strokesIn, tmpl, th, opts, result);
+  // 筆画の番号(赤で示す筆画)を、書いたままの番号に戻す
+  for (const r of out.reasons) if (r.stroke !== null && r.stroke !== undefined) r.stroke = tidy.map[r.stroke];
+  return out;
+}
+
+/**
+ * 書いた筆画の手直し(画数がお手本より多いときだけ)。
+ * 1. ちょんと触れただけの点(字の大きさの 4% 未満の短い筆画)を、短い順に除く
+ * 2. merge のとき: 前の筆画の終わりと次の筆画の始まりがすぐ近く(字の大きさの 6% 以内)で、向きが続いている(45° 以内)2 画を 1 画につなぐ
+ * @returns {{strokes: number[][][], map: number[], removed: number, merged: number}} map[i] = 手直し後の i 画目に当たる、書いたままの番号
+ */
+export function tidyStrokes(strokes, n, { merge = false } = {}) {
+  let list = strokes.map((s, i) => ({ s, i }));
+  const box = bbox(strokes);
+  const size = Math.max(box.w, box.h) || 1;
+  let removed = 0, merged = 0;
+  while (list.length > n) {
+    let k = -1, best = Infinity;
+    list.forEach((x, j) => {
+      const L = polyLength(x.s);
+      if (L < size * 0.04 && L < best) { best = L; k = j; }
+    });
+    if (k < 0) break;
+    list.splice(k, 1);
+    removed++;
+  }
+  while (merge && list.length > n) {
+    let k = -1, best = Infinity;
+    for (let j = 0; j + 1 < list.length; j++) {
+      const a = list[j].s, b = list[j + 1].s;
+      const gap = Math.hypot(b[0][0] - a[a.length - 1][0], b[0][1] - a[a.length - 1][1]);
+      if (gap > size * 0.06) continue;
+      // 向き: 前の筆画の最後の部分と、次の筆画の最初の部分
+      const ta = a.slice(-Math.min(a.length, 4)), tb = b.slice(0, Math.min(b.length, 4));
+      if (ta.length > 1 && tb.length > 1) {
+        let d = Math.abs(angleOf(ta) - angleOf(tb)) * (180 / Math.PI);
+        if (d > 180) d = 360 - d;
+        // ほぼくっついている(3% 以内)なら角で離してもよい(㇕ の角など)。少し離れているときは、向きが続いていること
+        if (d > (gap <= size * 0.03 ? 120 : 45)) continue;
+      }
+      if (gap < best) { best = gap; k = j; }
+    }
+    if (k < 0) break;
+    list.splice(k, 2, { s: [...list[k].s, ...list[k + 1].s], i: list[k].i });
+    merged++;
+  }
+  return { strokes: list.map((x) => x.s), map: list.map((x) => x.i), removed, merged };
+}
+
+function judgeStrokes(strokesIn, tmpl, th, opts, result) {
 
   const N = normalizePair(strokesIn, tmpl);
   const n = tmpl.length;

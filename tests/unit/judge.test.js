@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { judge, hungarian, resample, toTemplate, normalizePair, CHAR_GROUPS, LEVELS } from '../../judge.js';
+import { judge, hungarian, resample, toTemplate, normalizePair, CHAR_GROUPS, LEVELS, tidyStrokes } from '../../judge.js';
 import { simulate, rng, NOISE, loadTemplate, GRADE12, CONFUSABLE_SAME, CONFUSABLE_COUNT } from '../simulate.js';
 
 /** お手本を、キャンバス座標(300px)の [[x,y],...] にそのまま写したもの */
@@ -154,8 +154,9 @@ describe('模擬の手書きによる検証', () => {
     for (const [x, y] of [['干', '千'], ['千', '干'], ['人', '入'], ['入', '人'], ['午', '牛'], ['牛', '午'], ['刀', '力'], ['力', '刀']]) {
       expect(falsePass(x, y, 'superLenient', 200, 7), `${x}→${y}`).toBeLessThanOrEqual(0.05);
     }
-    // 横画の長さだけが違うペアも、半分以上は見分ける
-    for (const [x, y] of [['末', '未'], ['未', '末'], ['士', '土'], ['土', '士'], ['日', '曰'], ['曰', '日']]) {
+    // 縦横比だけが違うペア(日・曰)は、半分以上は見分ける。
+    // 横画の長さだけが違うペア(末・未、士・土)は、超甘いでは見分けない(実際の手書きの長さのゆれと区別できないため。甘い以上で見分ける)
+    for (const [x, y] of [['日', '曰'], ['曰', '日']]) {
       expect(falsePass(x, y, 'superLenient', 200, 7), `${x}→${y}`).toBeLessThanOrEqual(0.4);
     }
   });
@@ -184,5 +185,34 @@ describe('模擬の手書きによる検証', () => {
         }
       }
     }
+  });
+});
+
+describe('書いた筆画の手直し(画数が多いとき)', () => {
+  const t = toTemplate(loadTemplate('三')).map((s) => s.map(([x, y]) => [x * 3, y * 3]));
+
+  it('ちょんと触れただけの点は除いて判定する(どの厳しさでも)。赤で示す筆画の番号は書いたままの番号', () => {
+    const user = [t[0], [[200, 30]], t[1], t[2]]; // 2 画目に点
+    for (const level of Object.keys(LEVELS)) {
+      const r = judge(user, loadTemplate('三'), { level, char: '三' });
+      expect(r.pass, level).toBe(true);
+      expect(r.notes.join()).toContain('小さな点を 1 つ除いて');
+    }
+    const tidy = tidyStrokes(user, 3);
+    expect(tidy.map).toEqual([0, 2, 3]);
+  });
+
+  it('途中で離した筆画は、甘い・超甘いではつなぐ。標準・シビアでは画数が違う', () => {
+    const s = resample(t[1], 20); // 点を増やしてから、まん中で 2 つに分ける
+    const m = Math.floor(s.length / 2);
+    const user = [t[0], s.slice(0, m + 1), s.slice(m), t[2]];
+    expect(judge(user, loadTemplate('三'), { level: 'superLenient', char: '三' }).pass).toBe(true);
+    expect(judge(user, loadTemplate('三'), { level: 'lenient', char: '三' }).pass).toBe(true);
+    expect(judge(user, loadTemplate('三'), { level: 'standard', char: '三' }).reasons[0].text).toContain('画数が違います');
+  });
+
+  it('点ではない余分な画は除かず、離れた 2 画はつながない(画数が違うまま)', () => {
+    const extra = [t[0], t[1], t[2], [[40, 200], [120, 200]]];
+    expect(judge(extra, loadTemplate('三'), { level: 'superLenient', char: '三' }).reasons[0].text).toContain('画数が違います');
   });
 });
