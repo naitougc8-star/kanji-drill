@@ -262,7 +262,6 @@ textarea { min-height: 140px; resize: vertical; }
 .cell.fail canvas.pad { border-color: var(--ng); }
 .cell .model-label, .cell .note { font-size: 13px; color: var(--muted); }
 .kana { font-size: clamp(40px, 8vw, 72px); font-weight: 600; align-self: flex-start; padding: 0 2px; }
-.tools { justify-content: center; }
 .verdict { margin-top: 8px; }
 .verdict-title { font-size: 26px; font-weight: 800; text-align: center; margin: 8px 0; }
 .verdict-title.ok { color: var(--ok); }
@@ -397,3 +396,13 @@ details.fold > summary:focus-visible { outline: 2px solid var(--accent); outline
 .ask-text { margin: 0 0 12px; font-size: 17px; line-height: 1.6; }
 .ask-input { width: 100%; min-height: 48px; font-size: 18px; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); margin-bottom: 12px; }
 .ask-buttons { justify-content: flex-end; }
+
+/* 出題画面のボタン: まん中に書く・判定のボタン、右にスキップ(判定しないで、あとで出す) */
+.tools { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 10px; margin: 10px 0; }
+.tools-main { grid-column: 2; display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+.tools #btn-skip { grid-column: 3; justify-self: end; }
+@media (max-width: 600px) {
+  .tools { grid-template-columns: 1fr; }
+  .tools-main, .tools #btn-skip { grid-column: 1; justify-self: center; }
+}
+.btn.btn-skip { background: #c00000; color: #fff; border-color: #6d0000; }

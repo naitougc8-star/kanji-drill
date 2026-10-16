@@ -211,11 +211,14 @@
       <div id="kana-box" class="kana-box" hidden>
         <input id="kana-input" class="kana-input" placeholder="続きを、ひらがなで入力" aria-label="続き(ひらがな)" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done">
       </div>
-      <div id="tools" class="row tools">
-        <button type="button" id="btn-undo" class="btn">一画戻す</button>
-        <button type="button" id="btn-clear" class="btn">消す</button>
-        <button type="button" id="btn-clear-all" class="btn">全部消す</button>
-        <button type="button" id="btn-judge" class="btn primary">判定する</button>
+      <div id="tools" class="tools">
+        <span class="tools-main">
+          <button type="button" id="btn-undo" class="btn">一画戻す</button>
+          <button type="button" id="btn-clear" class="btn">消す</button>
+          <button type="button" id="btn-clear-all" class="btn">全部消す</button>
+          <button type="button" id="btn-judge" class="btn primary">判定する</button>
+        </span>
+        <button type="button" id="btn-skip" class="btn btn-skip" title="判定しないで、この回の最後にもう一度出す">スキップ</button>
       </div>
       <div id="verdict" class="verdict" hidden>
         <p id="verdict-title" class="verdict-title"></p>

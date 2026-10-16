@@ -1338,7 +1338,7 @@ async function onJudge() {
     });
     cell.result = res;
     const bad = res.reasons.filter((r) => r.stroke !== null && r.stroke !== undefined).map((r) => r.stroke);
-    cell.pad.showMarks(bad);
+    cell.pad.showMarks(bad, res.pass ? 'pass' : 'fail');
     cell.wrap.classList.add(res.pass ? 'pass' : 'fail');
     if (!res.pass) allOk = false;
     for (const r of res.reasons) reasons.push({ bad: true, text: `「${cell.char}」${r.text}` });
@@ -1497,6 +1497,20 @@ function onSelf(ok) {
 function onOverride() {
   current.manualPass = true;
   updateVerdict();
+}
+
+/** スキップ: 判定しない(成績も記録しない)で、この回の最後にもう一度出す */
+function onSkip() {
+  const s = state.session;
+  if (!current || current.judged) return;
+  if (s.index >= s.queue.length - 1) {
+    showMessage('残りはこの問題だけです。書いて「判定する」を押してください。', 'info');
+    return;
+  }
+  hideMessage();
+  const [id] = s.queue.splice(s.index, 1);
+  s.queue.push(id);
+  renderQuestion();
 }
 
 function onNext() {
@@ -1801,6 +1815,7 @@ function init() {
   $('btn-clear').addEventListener('click', onClear);
   $('btn-clear-all').addEventListener('click', onClearAll);
   $('btn-judge').addEventListener('click', onJudge);
+  $('btn-skip').addEventListener('click', onSkip);
   // 百人一首の入力欄: Enter で判定(かな漢字変換の確定の Enter は除く)
   $('kana-input').addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) {

@@ -10,6 +10,11 @@ const INK = '#1d1d1f';
 const RED = '#d70015';
 const GUIDE = 'rgba(200, 80, 60, 0.35)';
 const PAPER = '#fffdf7';
+// 判定のあとのマスの色(合格: うすい緑の紙に深緑の字、不合格: うすいオレンジの紙に茶色の字。間違えた筆画は赤)
+const RESULT_COLORS = {
+  pass: { paper: '#d4ebb4', ink: '#4a6630' },
+  fail: { paper: '#fbdcc6', ink: '#6b5242' },
+};
 
 function setupCanvas(canvas, size) {
   const dpr = Math.max(1, Math.min(3, globalThis.devicePixelRatio || 1));
@@ -23,9 +28,9 @@ function setupCanvas(canvas, size) {
 }
 
 /** マスの背景(十字と斜めの補助線。薄い破線) */
-export function drawGrid(ctx, size) {
+export function drawGrid(ctx, size, paper = PAPER) {
   ctx.save();
-  ctx.fillStyle = PAPER;
+  ctx.fillStyle = paper;
   ctx.fillRect(0, 0, size, size);
   ctx.strokeStyle = GUIDE;
   ctx.lineWidth = 1;
@@ -235,16 +240,17 @@ export class Pad {
   }
 
   /** 判定の結果を表示する。bad: 不合格の筆画番号(書いた順、0 始まり)の集合 */
-  showMarks(bad) {
-    this.marks = { bad: new Set(bad) };
+  showMarks(bad, status = null) {
+    this.marks = { bad: new Set(bad), status };
     this.redraw();
   }
 
   redraw() {
     const { ctx, size } = this;
-    drawGrid(ctx, size);
+    const colors = (this.marks && RESULT_COLORS[this.marks.status]) || { paper: PAPER, ink: INK };
+    drawGrid(ctx, size, colors.paper);
     const bad = this.marks ? this.marks.bad : new Set();
-    this.strokes.forEach((pts, i) => drawPolyline(ctx, pts, this.lineWidth(), bad.has(i) ? RED : INK));
+    this.strokes.forEach((pts, i) => drawPolyline(ctx, pts, this.lineWidth(), bad.has(i) ? RED : colors.ink));
     if (this.marks) {
       const r = Math.max(8, size / 20);
       this.strokes.forEach((pts, i) => {

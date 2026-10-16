@@ -121,7 +121,19 @@ for (const name of DEVICES) {
 
     // 出題(順番はばらばら)
     await page.locator('#btn-start').tap();
+    // スキップ: 判定しないで、この回の最後に回す
+    const skipped = await page.locator('#screen-drill').getAttribute('data-word');
+    await page.locator('#btn-skip').tap();
+    await expect(page.locator('#screen-drill')).not.toHaveAttribute('data-word', skipped);
+    await expect(page.locator('#progress')).toContainText('1 / 3 問');
     for (let q = 0; q < 3; q++) {
+      if (q === 2) {
+        // スキップした問題が最後に出る。最後の 1 問はスキップできない
+        await expect(page.locator('#screen-drill')).toHaveAttribute('data-word', skipped);
+        await page.locator('#btn-skip').tap();
+        await expect(page.locator('#message')).toContainText('残りはこの問題だけです');
+        await expect(page.locator('#screen-drill')).toHaveAttribute('data-word', skipped);
+      }
       await expect(page.locator('#screen-drill')).toBeVisible();
       const kind = await page.locator('#screen-drill').getAttribute('data-kind');
       await expectNoHorizontalScroll(page, `出題画面(${kind})`);
@@ -157,6 +169,9 @@ for (const name of DEVICES) {
         await writeCells(page);
         await page.locator('#btn-judge').tap();
         await expect(page.locator('#verdict-title')).toHaveText('○ 合格');
+        // 合格したマスは、うすい緑の紙になる
+        const paper = await page.locator('#cells .cell canvas.pad').first().evaluate((c) => [...c.getContext('2d').getImageData(4, c.height / 2 + 7, 1, 1).data]);
+        expect(paper[1], `マスの紙の色 ${paper}`).toBeGreaterThan(paper[0] + 10);
         await shot(page, `3-answer-${kind}`);
       }
       await page.locator('#btn-next').tap();
