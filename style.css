@@ -248,7 +248,8 @@ textarea { min-height: 140px; resize: vertical; }
 .word-list .warn { color: var(--ng); font-size: 13px; grid-column: 2 / 4; }
 
 /* 出題 */
-.drill-head { display: flex; justify-content: space-between; align-items: center; }
+.drill-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.drill-head .btn { flex: 0 0 auto; white-space: nowrap; } /* 「やめる」を 1 行に(iPhone の縦向き) */
 .progress { color: var(--muted); font-weight: 600; }
 .reading { font-size: clamp(34px, 7vw, 56px); font-weight: 700; text-align: center; letter-spacing: 0.08em; margin: 4px 0; }
 .context { text-align: center; font-size: 19px; color: var(--muted); min-height: 1.6em; overflow-wrap: anywhere; }
