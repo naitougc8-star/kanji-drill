@@ -216,3 +216,41 @@ describe('書いた筆画の手直し(画数が多いとき)', () => {
     expect(judge(extra, loadTemplate('三'), { level: 'superLenient', char: '三' }).reasons[0].text).toContain('画数が違います');
   });
 });
+
+describe('実際の手書きで不合格になっていた例(超甘い)', () => {
+  const px = (ch) =>
+    toTemplate(loadTemplate(ch)).map((s) => {
+      // 3 倍に広げて、3px おきの点にする(書いた筆画と同じように点が多い)
+      const o = [[s[0][0] * 3, s[0][1] * 3]];
+      for (let i = 1; i < s.length; i++) {
+        const [a, b] = [s[i - 1], s[i]];
+        const n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1])));
+        for (let k = 1; k <= n; k++) o.push([(a[0] + ((b[0] - a[0]) * k) / n) * 3, (a[1] + ((b[1] - a[1]) * k) / n) * 3]);
+      }
+      return o;
+    });
+
+  it('下: 3 画目の点を長い線で書いても合格(超甘い)。標準では不合格', () => {
+    const u = px('下');
+    const s = u[2], a = s[0], b = s[s.length - 1];
+    u[2] = Array.from({ length: 40 }, (_, k) => [a[0] + ((b[0] - a[0]) * 3.8 * k) / 39, a[1] + ((b[1] - a[1]) * 3.8 * k) / 39]);
+    expect(judge(u, loadTemplate('下'), { level: 'superLenient', char: '下' }).pass).toBe(true);
+    expect(judge(u, loadTemplate('下'), { level: 'standard', char: '下' }).pass).toBe(false);
+  });
+
+  it('道: しんにょうの 2 画を続けて書いても(11 画)、角で分けて合格。標準では画数が違う', () => {
+    const t = px('道');
+    const u = [...t.slice(0, 10), [...t[10], ...t[11]]];
+    const r = judge(u, loadTemplate('道'), { level: 'superLenient', char: '道' });
+    expect(r.pass).toBe(true);
+    expect(r.notes.join()).toContain('続けて書いた筆画を 1 か所で分けて');
+    expect(judge(u, loadTemplate('道'), { level: 'standard', char: '道' }).reasons[0].text).toContain('画数が違います');
+  });
+
+  it('角で分けても、お手本で続いていない 2 画には当てない(日 を分けて 目 にしない)', () => {
+    const r = rng(9);
+    let pass = 0;
+    for (let k = 0; k < 50; k++) if (judge(simulate(loadTemplate('日'), NOISE.normal, r), loadTemplate('目'), { level: 'superLenient', char: '目' }).pass) pass++;
+    expect(pass).toBe(0);
+  });
+});

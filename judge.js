@@ -5,11 +5,12 @@
 
 /** 厳しさごとのしきい値。数値の根拠は README の「判定のしきい値」を参照。 */
 export const LEVELS = {
-  // 超甘い: 形のゆれをさらに大きく許す(画数・明らかに違う形は不合格のまま)。途中で離した筆画はつなぐ。
-  //   平行な 2 本の長さの関係は、はっきり逆のときだけ不合格(横画の長さだけが違う似た字(末・未、士・土)は通ることが多い)
-  superLenient: { label: '超甘い', mean: 0.3, max: 0.62, end: 0.4, lenLo: 0.36, lenHi: 2.8, lenAbs: 0.4, angle: 58, aspect: 1.0, relLen: 1.0, maxRot: 35, maxScale: 2.2, rule: 1.4, group: 0.6, merge: true },
-  // 甘い: 字の形のゆれ(位置・長さ・角度)は大きく許し、似た字を見分けるチェック(長さの関係・字ごとのルール)は標準と同じくらいに残す。途中で離した筆画はつなぐ
-  lenient: { label: '甘い', mean: 0.2, max: 0.42, end: 0.26, lenLo: 0.5, lenHi: 2.0, lenAbs: 0.26, angle: 38, aspect: 0.65, relLen: 0.5, maxRot: 25, maxScale: 1.7, rule: 1.2, group: 0.5, merge: true },
+  // 超甘い: 形のゆれをさらに大きく許す(画数・明らかに違う形は不合格のまま)。途中で離した筆画はつなぎ、続けて書いた筆画は角で分ける。
+  //   平行な 2 本の長さの関係は見ない(横画の長さだけが違う似た字(末・未、士・土)は見分けない)。点は長い線で書いてもよい
+  superLenient: { label: '超甘い', mean: 0.3, max: 0.62, end: 0.4, lenLo: 0.36, lenHi: 2.8, lenAbs: 0.4, angle: 58, aspect: 1.0, relLen: null, maxRot: 35, maxScale: 2.2, rule: 1.4, group: 0.6, merge: true, split: true, splitRelLen: 0.5, dotLine: true },
+  // 甘い: 字の形のゆれ(位置・長さ・角度)は大きく許し、似た字を見分けるチェック(長さの関係・字ごとのルール)は標準と同じくらいに残す。
+  //   途中で離した筆画はつなぎ、続けて書いた筆画は角で分ける
+  lenient: { label: '甘い', mean: 0.2, max: 0.42, end: 0.26, lenLo: 0.5, lenHi: 2.0, lenAbs: 0.26, angle: 38, aspect: 0.65, relLen: 0.5, maxRot: 25, maxScale: 1.7, rule: 1.2, group: 0.5, merge: true, split: true },
   standard: { label: '標準', mean: 0.15, max: 0.32, end: 0.21, lenLo: 0.58, lenHi: 1.7, lenAbs: 0.2, angle: 30, aspect: 0.55, relLen: 0.5, maxRot: 20, maxScale: 1.5, rule: 1.2, group: 0.5 },
   severe: { label: 'シビア', mean: 0.11, max: 0.25, end: 0.16, lenLo: 0.68, lenHi: 1.48, lenAbs: 0.15, angle: 22, aspect: 0.42, relLen: 0.35, maxRot: 15, maxScale: 1.4, rule: 1.0, group: 0.32 },
 };
@@ -18,6 +19,7 @@ export const DEFAULT_LEVEL = 'severe';
 export const N_POINTS = 24;
 const UNIFORM_RATIO = 0.22; // お手本の短辺/長辺がこれ未満なら縦横比を保って正規化
 const LEN_MIN = 0.2; // これより短いお手本の筆画は長さの比ではなく差で判定
+const DOT_LEN = 0.35; // これより短いお手本の筆画は「点」(甘い判定では、長い線で書いてもよい)
 const CHORD_MIN = 0.12; // 始点→終点の距離がこれ以下なら角度は見ない
 const PENALTY = 0.3;
 const REVERSE_BIAS = 0.05;
@@ -210,15 +212,17 @@ export function compareStroke(u, t, th) {
     angle = a;
   }
   const fails = [];
+  // 点(お手本の短い筆画。下の 3 画目、心の点など)を長い線で書いたとき: 甘い判定では、書き始めの位置と向きだけを見る
+  const dotAsLine = th.dotLine && lt <= DOT_LEN && lu > lt;
   if (lenRatio !== null && lenRatio < th.lenLo) fails.push('short');
-  if (lenRatio !== null && lenRatio > th.lenHi) fails.push('long');
-  if (lenDiff !== null && lenDiff > th.lenAbs) fails.push('long');
+  if (!dotAsLine && lenRatio !== null && lenRatio > th.lenHi) fails.push('long');
+  if (!dotAsLine && lenDiff !== null && lenDiff > th.lenAbs) fails.push('long');
   if (lenDiff !== null && lenDiff < -th.lenAbs) fails.push('short');
   if (angle !== null && angle > th.angle) fails.push('angle');
   if (start > th.end) fails.push('start');
-  if (end > th.end) fails.push('end');
-  if (mean > th.mean) fails.push('mean');
-  if (max > th.max) fails.push('max');
+  if (!dotAsLine && end > th.end) fails.push('end');
+  if (!dotAsLine && mean > th.mean) fails.push('mean');
+  if (!dotAsLine && max > th.max) fails.push('max');
   const cost = mean + 0.5 * Math.max(start, end) + (fails.length ? PENALTY : 0);
   return { mean, max, start, end, lenRatio, lenDiff, angle, offset: [cx / n, cy / n], fails, ok: fails.length === 0, cost };
 }
@@ -413,6 +417,11 @@ export function judge(user, template, opts = {}) {
   const strokesIn = tidy.strokes;
   if (tidy.removed) result.notes.push(`触れただけの小さな点を ${tidy.removed} つ除いて判定しました`);
   if (tidy.merged) result.notes.push(`途中で離れた筆画を ${tidy.merged} か所つないで判定しました`);
+  // 画数が少ないときは、(甘い判定では)続けて書いた筆画を角で分けて、合う分け方を探す
+  if (strokesIn.length < tmpl.length && th.split) {
+    const found = splitSearch(strokesIn, tidy.map, tmpl, th, opts, result);
+    if (found) return found;
+  }
   if (strokesIn.length !== tmpl.length) {
     result.reasons.push({ stroke: null, text: `画数が違います(正解 ${tmpl.length} 画 / あなた ${written.length} 画)` });
     return result;
@@ -465,6 +474,84 @@ export function tidyStrokes(strokes, n, { merge = false } = {}) {
     merged++;
   }
   return { strokes: list.map((x) => x.s), map: list.map((x) => x.i), removed, merged };
+}
+
+/**
+ * 筆画の角(曲がりが 45° 以上の所)。続けて書いた 2 画(道の自、端の而 など)を分ける候補。
+ * @returns {{at: number, turn: number}[]} at: 書いた点の番号、turn: 曲がりの角度
+ */
+export function cornersOf(s, size) {
+  if (s.length < 3 || polyLength(s) < size * 0.15) return [];
+  const M = 40, w = 3;
+  const r = resample(s, M);
+  const turn = new Array(M).fill(0);
+  for (let j = w; j < M - w; j++) {
+    const a = Math.atan2(r[j][1] - r[j - w][1], r[j][0] - r[j - w][0]);
+    const b = Math.atan2(r[j + w][1] - r[j][1], r[j + w][0] - r[j][0]);
+    let d = Math.abs(a - b) * (180 / Math.PI);
+    if (d > 180) d = 360 - d;
+    turn[j] = d;
+  }
+  const out = [];
+  for (let j = w; j < M - w; j++) {
+    if (turn[j] < 45 || turn[j] < turn[j - 1] || turn[j] < turn[j + 1]) continue;
+    // 打ち直した点に、いちばん近い書いた点(両端の点は除く)
+    let at = 1, best = Infinity;
+    for (let i = 1; i < s.length - 1; i++) {
+      const d = Math.hypot(s[i][0] - r[j][0], s[i][1] - r[j][1]);
+      if (d < best) { best = d; at = i; }
+    }
+    if (!out.some((c) => c.at === at)) out.push({ at, turn: turn[j] });
+  }
+  return out;
+}
+
+const SPLIT_MAX_TRIES = 300;
+
+/** 画数が 1〜2 画少ないとき、角で分けて合格になる分け方を探す。見つからなければ null */
+function splitSearch(strokes, map, tmpl, th, opts, base) {
+  const need = tmpl.length - strokes.length;
+  if (need > 2) return null;
+  const box = bbox(strokes);
+  const size = Math.max(box.w, box.h) || 1;
+  const tb = bbox(tmpl);
+  const tsize = Math.max(tb.w, tb.h) || 1;
+  const cand = [];
+  strokes.forEach((s, i) => cornersOf(s, size).forEach((c) => cand.push({ i, at: c.at, turn: c.turn })));
+  cand.sort((a, b) => b.turn - a.turn);
+  const list = cand.slice(0, 24);
+  const combos = [];
+  if (need === 1) list.forEach((c) => combos.push([c]));
+  else for (let a = 0; a < list.length; a++) for (let b = a + 1; b < list.length; b++) combos.push([list[a], list[b]]);
+  for (const combo of combos.slice(0, SPLIT_MAX_TRIES)) {
+    const pieces = [], pmap = [], joins = [];
+    strokes.forEach((s, i) => {
+      const cuts = combo.filter((c) => c.i === i).map((c) => c.at).sort((x, y) => x - y);
+      let from = 0;
+      for (const at of cuts) {
+        pieces.push(s.slice(from, at + 1));
+        pmap.push(map[i]);
+        joins.push(pieces.length - 1); // この番号の画と、次の画は続けて書いたもの
+        from = at;
+      }
+      pieces.push(s.slice(from));
+      pmap.push(map[i]);
+    });
+    if (pieces.some((p) => p.length < 2)) continue;
+    const result = { ...base, reasons: [], notes: [...base.notes, `続けて書いた筆画を ${need} か所で分けて判定しました`], assign: null, strokes: [] };
+    // 分けたときは、平行な 2 本の長さの関係も確かめる(持 → 特 のように、画数が 1 つ違う似た字を通さないため)
+    const out = judgeStrokes(pieces, tmpl, th.splitRelLen ? { ...th, relLen: th.splitRelLen } : th, opts, result);
+    // 分けた 2 画が、お手本で続いている 2 画(前の画の終わりと次の画の始まりが近い)に当たるときだけ認める。
+    // (日を角で分けて 目 として合格させる、のようなことを防ぐ)
+    const natural = out.assign && joins.every((p) => {
+      const a = out.assign[p], b = out.assign[p + 1];
+      if (b !== a + 1) return false;
+      const ea = tmpl[a][tmpl[a].length - 1], sb = tmpl[b][0];
+      return Math.hypot(sb[0] - ea[0], sb[1] - ea[1]) <= tsize * 0.2;
+    });
+    if (out.pass && natural) return out; // 合格なので、赤で示す筆画はない
+  }
+  return null;
 }
 
 function judgeStrokes(strokesIn, tmpl, th, opts, result) {
