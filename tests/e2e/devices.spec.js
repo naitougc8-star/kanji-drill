@@ -109,6 +109,16 @@ for (const name of DEVICES) {
     await expect(page.locator('#fold-import')).not.toHaveAttribute('open', '');
     await page.locator('#fold-backup summary').tap();
     await expect(page.locator('#fold-backup')).not.toHaveAttribute('open', '');
+    // 写真のまとまりの名前を変える(12 文字まで)。数は「問」
+    const g1 = page.locator('.group-head[data-group="1"]');
+    await expect(g1.locator('.gcount')).toHaveText('2 問');
+    await g1.locator('.gname').tap();
+    await confirmAsk(page, '十三文字の長い名前を付けてみる');
+    await expect(page.locator('#message')).toContainText('12 文字までです');
+    await g1.locator('.gname').tap();
+    await confirmAsk(page, '吉野弘の詩');
+    await expect(g1.locator('.gname')).toHaveText('吉野弘の詩');
+    await expect(g1.locator('.stats-rate')).toHaveText('—'); // まだ出題していない
     await page.locator('.group-head[data-group="2"] .gfold').tap();
     await expect(page.locator('#word-list ul[data-group="2"]')).toBeHidden();
     await expect(page.locator('.group-head[data-group="2"] .gfold')).toHaveAttribute('aria-expanded', 'false');
@@ -186,6 +196,17 @@ for (const name of DEVICES) {
     // 再読み込みしても、成績と開け閉めが残っている
     await page.reload();
     await expect(page.locator('#fold-import')).not.toHaveAttribute('open', '');
+    // 合格率(出題した語のうち合格した語): 全体 2/3、写真 1(書き取り・読み)は 2/2、写真 2(百人一首)は 0/1
+    await expect(page.locator('#result-summary .stats-rate')).toHaveText('67%');
+    await expect(page.locator('.group-head[data-group="1"] .stats-rate')).toHaveText('100%');
+    await expect(page.locator('.group-head[data-group="1"] .gname')).toHaveText('吉野弘の詩');
+    await expect(page.locator('#result-summary .cyl.pass')).toHaveCount(1);
+    await shot(page, '6-stats');
+    // 写真のまとまりごとに成績をリセット
+    await page.locator('.group-head[data-group="1"] .greset').tap();
+    await confirmAsk(page);
+    await expect(page.locator('.group-head[data-group="1"] .stats-rate')).toHaveText('—');
+    await expect(page.locator('#result-summary .stats-rate')).toHaveText('0%');
     await expect(page.locator('#word-list ul[data-group="2"]')).toBeHidden();
     await expect(page.locator('#btn-start-wrong')).toHaveText('不合格の語だけ出題する(1 語)');
 

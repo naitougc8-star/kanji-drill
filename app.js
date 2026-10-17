@@ -732,19 +732,33 @@ function groupHead(g) {
   const head = document.createElement('div');
   head.className = 'group-head';
   head.dataset.group = g.key;
-  const name = document.createElement('span');
+  const label = groupLabel(g);
+  const name = document.createElement('button');
+  name.type = 'button';
   name.className = 'gname';
-  name.textContent = g.label;
+  name.textContent = label;
+  name.title = 'タップして名前を変える(12 文字まで)';
+  name.addEventListener('click', () => renameGroup(g));
   const count = document.createElement('span');
   count.className = 'gcount';
-  count.textContent = `${g.words.length} 語`;
+  count.textContent = `${g.words.length} 問`;
+  const stats = statsView(g.words, true);
+  const reset = document.createElement('button');
+  reset.type = 'button';
+  reset.className = 'btn small greset';
+  reset.textContent = '成績をリセット';
+  reset.disabled = stats.count.none === stats.total;
+  reset.addEventListener('click', async () => {
+    if (!(await ask(`「${label}」の合格・不合格の記録を消しますか?`))) return;
+    resetResults(g.words);
+  });
   const on = document.createElement('label');
   on.className = 'check';
   const cb = document.createElement('input');
   cb.type = 'checkbox';
   cb.checked = g.words.every((w) => w.enabled);
   cb.indeterminate = !cb.checked && g.words.some((w) => w.enabled);
-  cb.setAttribute('aria-label', `${g.label}の語をまとめて出題する`);
+  cb.setAttribute('aria-label', `${label}の語をまとめて出題する`);
   cb.addEventListener('change', () => {
     for (const w of g.words) {
       w.enabled = cb.checked;
@@ -761,7 +775,7 @@ function groupHead(g) {
   del.className = 'btn small';
   del.textContent = 'まとめて削除';
   del.addEventListener('click', async () => {
-    if (!(await ask(`${g.label}の ${g.words.length} 語を、このテストから削除しますか?`))) return;
+    if (!(await ask(`「${label}」の ${g.words.length} 問を、このテストから削除しますか?`))) return;
     const ids = new Set(g.words.map((w) => w.id));
     state.words = state.words.filter((w) => !ids.has(w.id));
     persist();
@@ -773,7 +787,7 @@ function groupHead(g) {
   fold.className = 'gfold';
   const open = !groupClosed(g.key);
   fold.setAttribute('aria-expanded', open ? 'true' : 'false');
-  fold.setAttribute('aria-label', `${g.label}の語を${open ? '閉じる' : '開く'}`);
+  fold.setAttribute('aria-label', `${label}の語を${open ? '閉じる' : '開く'}`);
   fold.addEventListener('click', () => {
     const key = groupFoldKey(g.key);
     const closed = new Set(state.settings.groupFolds);
@@ -783,8 +797,48 @@ function groupHead(g) {
     persist();
     renderWordList();
   });
-  head.append(name, count, fold, on, del);
+  head.append(name, count, stats.box, reset, on, del, fold);
   return head;
+}
+
+/** 写真ごとのまとまりの名前(名前を変えていれば、その名前) */
+function groupLabel(g) {
+  const set = state.sets.find((x) => x.id === state.currentSet);
+  return (set && set.groupNames && set.groupNames[g.key]) || g.label;
+}
+
+const GROUP_NAME_MAX = 12;
+
+/** 写真ごとのまとまりの名前を変える(12 文字まで。空にすると「写真 1」などに戻る) */
+async function renameGroup(g) {
+  const set = state.sets.find((x) => x.id === state.currentSet);
+  if (!set) return;
+  const input = await ask(`「${groupLabel(g)}」の新しい名前(${GROUP_NAME_MAX} 文字まで。空にすると「${g.label}」に戻ります)`, groupLabel(g));
+  if (input === null) return;
+  const name = input.trim();
+  if ([...name].length > GROUP_NAME_MAX) {
+    showMessage(`名前は ${GROUP_NAME_MAX} 文字までです(いまは ${[...name].length} 文字)。`);
+    return;
+  }
+  hideMessage();
+  set.groupNames = { ...(set.groupNames || {}) };
+  if (!name || name === g.label) delete set.groupNames[g.key];
+  else set.groupNames[g.key] = name;
+  set.updatedAt = Date.now();
+  persist();
+  renderWordList();
+}
+
+/** 成績(合格・不合格の記録)を消す */
+function resetResults(words) {
+  for (const w of words) {
+    w.result = null;
+    w.misses = 0;
+    w.passedAt = null;
+    w.updatedAt = Date.now();
+  }
+  persist();
+  renderWordList();
 }
 
 function rowClass(w) {
@@ -1035,19 +1089,50 @@ function updateCount() {
   $('btn-start-new').disabled = fresh === 0;
   $('btn-start-new').textContent = `未出題の語だけ出題する(${fresh} 語)`;
   // 区分ごとの集計(すべての語)
-  const count = Object.fromEntries(STATUS_ORDER.map((k) => [k, 0]));
-  for (const w of setWords()) if (canPlay(w)) count[statusOf(w)]++;
   const sum = $('result-summary');
   sum.textContent = '';
+  const view = statsView(setWords());
+  sum.appendChild(view.box);
+  $('btn-reset-results').disabled = view.count.none === view.total;
+}
+
+/**
+ * 成績の表示: 区分(合格・まちがいの回数・未出題)ごとの語の数と、立体の円柱の棒グラフ、右に合格率。
+ * 合格率 = 合格した語 ÷ 出題した語(未出題は数えない)。
+ * @param {object[]} words 対象の語(出題できる語だけを数える)
+ * @param {boolean} compact 写真ごとのまとまりの見出しに出す、小さな表示
+ */
+function statsView(words, compact = false) {
+  const count = Object.fromEntries(STATUS_ORDER.map((k) => [k, 0]));
+  for (const w of words) if (canPlay(w)) count[statusOf(w)]++;
+  const total = STATUS_ORDER.reduce((n, k) => n + count[k], 0);
+  const box = document.createElement('div');
+  box.className = 'stats' + (compact ? ' compact' : '');
+  const rows = document.createElement('div');
+  rows.className = 'stats-rows';
   for (const key of STATUS_ORDER) {
     if (key.startsWith('fail') && count[key] === 0) continue; // 0 語のまちがいの区分は出さない
     const b = document.createElement('span');
     b.className = `res ${key}`;
     b.dataset.status = key;
     b.textContent = `${STATUS_LABEL[key]} ${count[key]} 語`;
-    sum.appendChild(b);
+    const track = document.createElement('span');
+    track.className = 'cyl-track';
+    if (count[key] > 0) {
+      const bar = document.createElement('span');
+      bar.className = `cyl ${key}`;
+      bar.style.width = `${(count[key] / total) * 100}%`;
+      track.appendChild(bar);
+    }
+    rows.append(b, track);
   }
-  $('btn-reset-results').disabled = count.none === setWords().filter(canPlay).length;
+  const tried = total - count.none;
+  const rate = document.createElement('div');
+  rate.className = 'stats-rate';
+  rate.title = '合格率(出題した語のうち、合格した語の割合)';
+  rate.textContent = tried ? `${Math.round((count.pass / tried) * 100)}%` : '—';
+  box.append(rows, rate);
+  return { box, count, total };
 }
 
 async function onAddWord(e) {
@@ -1185,6 +1270,7 @@ async function renderQuestion() {
   $('screen-drill').dataset.kind = kind;
   $('verdict').hidden = true;
   $('btn-sanko').hidden = true;
+  $('btn-skip').hidden = false;
   $('answer').hidden = true;
   $('tools').hidden = false;
   for (const id of ['btn-undo', 'btn-clear', 'btn-clear-all']) $(id).hidden = kind === 'hyakunin';
@@ -1315,6 +1401,7 @@ async function onJudge() {
   }
   current.judged = true;
   $('tools').hidden = true;
+  $('btn-skip').hidden = true;
   showAnswer(w, check);
   $('btn-sanko').hidden = !sankoPoem(w);
   const reasons = [];
@@ -1801,14 +1888,7 @@ function init() {
   $('sanko').addEventListener('close', () => ($('sanko-frame').src = 'about:blank'));
   $('btn-reset-results').addEventListener('click', async () => {
     if (!(await ask(`「${currentSetName()}」の合格・不合格の記録をすべて消しますか?`))) return;
-    for (const w of setWords()) {
-      w.result = null;
-      w.misses = 0;
-      w.passedAt = null;
-      w.updatedAt = Date.now();
-    }
-    persist();
-    renderWordList();
+    resetResults(setWords());
   });
 
   $('btn-undo').addEventListener('click', onUndo);
@@ -1827,7 +1907,8 @@ function init() {
   $('btn-self-ng').addEventListener('click', () => onSelf(false));
   $('btn-override').addEventListener('click', onOverride);
   $('btn-next').addEventListener('click', onNext);
-  $('btn-quit').addEventListener('click', () => {
+  $('btn-quit').addEventListener('click', async () => {
+    if (!(await ask('出題をやめて、設定の画面に戻りますか?(ここまでに判定した問題の結果は記録されています)'))) return;
     for (const c of pads) c.pad.destroy();
     pads = [];
     current = null;

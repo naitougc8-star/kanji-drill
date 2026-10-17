@@ -67,4 +67,11 @@ describe('バックアップ', () => {
     expect(formatSize(size)).toMatch(/KB$/);
     expect(formatSize(3 * 1024 * 1024)).toBe('3.0 MB');
   });
+  it('写真ごとのまとまりの名前も、新しく変えた方を残す', () => {
+    const r = mergeBackup(
+      { sets: [{ id: 's1', name: 'テスト', updatedAt: 1, groupNames: { 1: '古い名前' } }], words: [] },
+      { sets: [{ id: 's1', name: 'テスト', updatedAt: 2, groupNames: { 1: '吉野弘', 2: '芥川' } }], words: [] },
+    );
+    expect(r.sets[0].groupNames).toEqual({ 1: '吉野弘', 2: '芥川' });
+  });
 });

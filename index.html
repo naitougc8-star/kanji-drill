@@ -132,7 +132,7 @@
           <span id="word-count" class="status"></span>
         </div>
         <div class="row">
-          <p id="result-summary" class="result-summary"></p>
+          <div id="result-summary" class="result-summary"></div>
           <button type="button" id="btn-reset-results" class="btn small">成績をリセット</button>
         </div>
         <div id="word-list" class="word-list"></div>
@@ -202,7 +202,10 @@
     <section id="screen-drill" class="screen" hidden>
       <div class="drill-head">
         <span id="progress" class="progress"></span>
-        <button type="button" id="btn-quit" class="btn small">やめる</button>
+        <span class="drill-actions">
+          <button type="button" id="btn-quit" class="btn small">やめる</button>
+          <button type="button" id="btn-skip" class="btn small btn-skip" title="判定しないで、この回の最後にもう一度出す">スキップ</button>
+        </span>
       </div>
       <div id="reading" class="reading"></div>
       <div id="reading-kana" class="reading-kana" hidden></div>
@@ -218,7 +221,6 @@
           <button type="button" id="btn-clear-all" class="btn">全部消す</button>
           <button type="button" id="btn-judge" class="btn primary">判定する</button>
         </span>
-        <button type="button" id="btn-skip" class="btn btn-skip" title="判定しないで、この回の最後にもう一度出す">スキップ</button>
       </div>
       <div id="verdict" class="verdict" hidden>
         <p id="verdict-title" class="verdict-title"></p>

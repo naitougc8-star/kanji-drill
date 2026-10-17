@@ -422,13 +422,15 @@ test('未出題の語だけ出題する・判定の厳しさ 4 段階・画面�
   await drawStrokes(page, page.locator('#cells .cell').first(), await templateOf(page, first));
   await page.click('#btn-judge');
   await page.click('#btn-next');
-  await page.click('#btn-quit'); // 1 問だけ答えてやめる
+  await page.click('#btn-quit'); // 1 問だけ答えてやめる(確認の窓が出る)
+  await confirmAsk(page);
   await expect(page.locator(`#word-list li[data-word="${first}"]`)).toHaveClass(/res-pass/);
   await expect(page.locator('#btn-start-new')).toHaveText('未出題の語だけ出題する(2 語)');
   await page.click('#btn-start-new');
   await expect(page.locator('#progress')).toContainText('1 / 2 問');
   expect(await page.locator('#screen-drill').getAttribute('data-word')).not.toBe(first);
   await page.click('#btn-quit');
+  await confirmAsk(page);
 
   // 画面の表示: 自動 → ダーク → ライト。再読み込みしても残る(描画の前に当たる)
   const bg = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
@@ -502,6 +504,7 @@ test('テスト(出題の範囲)ごとに語をまとめる: 作る・名前を�
   await expect(page.locator('#progress')).toContainText('1 / 1 問');
   await expect(page.locator('#screen-drill')).toHaveAttribute('data-word', '空');
   await page.click('#btn-quit');
+  await confirmAsk(page);
 
   // 中間テストに戻すと、中間テストの語だけ
   await page.locator('#set-select').selectOption({ label: '1 学期 中間テスト(4 語)' });

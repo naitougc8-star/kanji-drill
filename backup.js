@@ -42,7 +42,7 @@ export function parseBackup(text) {
 
 /**
  * ほかの端末のデータを合わせる。
- * - テスト: 同じテスト(id が同じ)はまとめ、名前は新しく変えた方を残す。ないテストは足す
+ * - テスト: 同じテスト(id が同じ)はまとめ、名前(写真ごとのまとまりの名前も)は新しく変えた方を残す。ないテストは足す
  * - 語: 同じ語(id が同じ)は、新しく更新した方(updatedAt が大きい方)を残す。ない語は足す
  * - 片方で削除した語・テストは、合わせても消えない(削除は、それぞれの端末で行う)
  * @returns {{sets: object[], words: object[], addedSets: number, addedWords: number, updatedWords: number}}
@@ -57,6 +57,7 @@ export function mergeBackup(cur, inc) {
       addedSets++;
     } else if ((s.updatedAt || 0) > (mine.updatedAt || 0)) {
       mine.name = s.name;
+      if (s.groupNames) mine.groupNames = { ...s.groupNames }; // 写真ごとのまとまりの名前
       mine.updatedAt = s.updatedAt;
     }
   }
