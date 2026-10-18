@@ -797,7 +797,10 @@ function groupHead(g) {
     persist();
     renderWordList();
   });
-  head.append(name, count, stats.box, reset, on, del, fold);
+  const title = document.createElement('span');
+  title.className = 'gtitle';
+  title.append(name, count);
+  head.append(title, stats.box, reset, on, del, fold);
   return head;
 }
 
@@ -1088,17 +1091,16 @@ function updateCount() {
   const fresh = list.filter((w) => !w.result).length;
   $('btn-start-new').disabled = fresh === 0;
   $('btn-start-new').textContent = `未出題の語だけ出題する(${fresh} 語)`;
-  // 区分ごとの集計(すべての語)
+  // 区分ごとの集計: 「出題する」にチェックの入っている語が分母(チェックを変えるたびに計算し直す)
   const sum = $('result-summary');
   sum.textContent = '';
-  const view = statsView(setWords());
-  sum.appendChild(view.box);
-  $('btn-reset-results').disabled = view.count.none === view.total;
+  sum.appendChild(statsView(list).box);
+  $('btn-reset-results').disabled = setWords().filter(canPlay).every((w) => statusOf(w) === 'none');
 }
 
 /**
- * 成績の表示: 区分(合格・まちがいの回数・未出題)ごとの語の数と、立体の円柱の棒グラフ、右に合格率。
- * 合格率 = 合格した語 ÷ 出題した語(未出題は数えない)。
+ * 成績の表示: 区分(合格・まちがいの回数・未出題)ごとの語の数と、立体の円柱の棒グラフ、右にその区分の割合。
+ * 割合と棒の長さの分母は、渡した語の数(全体: 「出題する」にチェックの入っている語、写真ごと: そのまとまりの語)。
  * @param {object[]} words 対象の語(出題できる語だけを数える)
  * @param {boolean} compact 写真ごとのまとまりの見出しに出す、小さな表示
  */
@@ -1124,14 +1126,13 @@ function statsView(words, compact = false) {
       bar.style.width = `${(count[key] / total) * 100}%`;
       track.appendChild(bar);
     }
-    rows.append(b, track);
+    const pct = document.createElement('span');
+    pct.className = `stats-pct ${key}`;
+    pct.dataset.status = key;
+    pct.textContent = total ? `${Math.round((count[key] / total) * 100)}%` : '—';
+    rows.append(b, track, pct);
   }
-  const tried = total - count.none;
-  const rate = document.createElement('div');
-  rate.className = 'stats-rate';
-  rate.title = '合格率(出題した語のうち、合格した語の割合)';
-  rate.textContent = tried ? `${Math.round((count.pass / tried) * 100)}%` : '—';
-  box.append(rows, rate);
+  box.append(rows);
   return { box, count, total };
 }
 

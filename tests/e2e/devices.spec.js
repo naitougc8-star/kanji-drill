@@ -118,7 +118,7 @@ for (const name of DEVICES) {
     await g1.locator('.gname').tap();
     await confirmAsk(page, '吉野弘の詩');
     await expect(g1.locator('.gname')).toHaveText('吉野弘の詩');
-    await expect(g1.locator('.stats-rate')).toHaveText('—'); // まだ出題していない
+    await expect(g1.locator('.stats-pct.none')).toHaveText('100%'); // まだ出題していない(2 問とも未出題)
     await page.locator('.group-head[data-group="2"] .gfold').tap();
     await expect(page.locator('#word-list ul[data-group="2"]')).toBeHidden();
     await expect(page.locator('.group-head[data-group="2"] .gfold')).toHaveAttribute('aria-expanded', 'false');
@@ -196,17 +196,32 @@ for (const name of DEVICES) {
     // 再読み込みしても、成績と開け閉めが残っている
     await page.reload();
     await expect(page.locator('#fold-import')).not.toHaveAttribute('open', '');
-    // 合格率(出題した語のうち合格した語): 全体 2/3、写真 1(書き取り・読み)は 2/2、写真 2(百人一首)は 0/1
-    await expect(page.locator('#result-summary .stats-rate')).toHaveText('67%');
-    await expect(page.locator('.group-head[data-group="1"] .stats-rate')).toHaveText('100%');
+    await shot(page, '6-stats');
+    // 割合の分母: 全体は「出題する」にチェックの入っている語(3 語)、写真ごとはそのまとまりの語
+    await expect(page.locator('#result-summary .stats-pct.pass')).toHaveText('67%');
+    await expect(page.locator('#result-summary .stats-pct.fail1')).toHaveText('33%');
+    await expect(page.locator('#result-summary .stats-pct.none')).toHaveText('0%');
+    await expect(page.locator('.group-head[data-group="1"] .stats-pct.pass')).toHaveText('100%');
+    // グラフの原点(棒の左の端)は、写真ごとのまとまりでそろっている
+    const x0 = await page.locator('.group-head .cyl-track').evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().left)));
+    if (info.w >= 768) expect(new Set(x0).size, `棒の左の端 ${x0}`).toBe(1);
+    // 横向きの iPad では、写真ごとの見出しが 1 行に収まる(開け閉めのボタンが右端の同じ行)
+    if (info.w >= 900) {
+      const head = await page.locator('.group-head[data-group="1"]').boundingBox();
+      const fold = await page.locator('.group-head[data-group="1"] .gfold').boundingBox();
+      expect(fold.y + fold.height, '開け閉めのボタンが 2 行目にある').toBeLessThanOrEqual(head.y + head.height / 2 + fold.height);
+      expect(head.height).toBeLessThan(110);
+    }
     await expect(page.locator('.group-head[data-group="1"] .gname')).toHaveText('吉野弘の詩');
     await expect(page.locator('#result-summary .cyl.pass')).toHaveCount(1);
-    await shot(page, '6-stats');
     // 写真のまとまりごとに成績をリセット
     await page.locator('.group-head[data-group="1"] .greset').tap();
     await confirmAsk(page);
-    await expect(page.locator('.group-head[data-group="1"] .stats-rate')).toHaveText('—');
-    await expect(page.locator('#result-summary .stats-rate')).toHaveText('0%');
+    await expect(page.locator('.group-head[data-group="1"] .stats-pct.none')).toHaveText('100%');
+    await expect(page.locator('#result-summary .stats-pct.pass')).toHaveText('0%');
+    // 「出題する」のチェックを外すと、全体の分母が変わる(3 語 → 1 語)
+    await page.locator('.group-head[data-group="1"] input[type="checkbox"]').uncheck();
+    await expect(page.locator('#result-summary .stats-pct.fail1')).toHaveText('100%');
     await expect(page.locator('#word-list ul[data-group="2"]')).toBeHidden();
     await expect(page.locator('#btn-start-wrong')).toHaveText('不合格の語だけ出題する(1 語)');
 
