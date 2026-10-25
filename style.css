@@ -412,6 +412,10 @@ details.fold > summary:focus-visible { outline: 2px solid var(--accent); outline
 .tree-folder-sets .tree-set + .tree-set { border-top: 1px solid var(--line); }
 .drill-scope { margin: 4px 0 0; }
 
+/* 語の一覧の、テストの見出し(いくつかのテストを出すとき) */
+.set-head { display: block; width: 100%; text-align: left; margin: 18px 0 2px; padding: 8px 12px; border: 0; border-left: 5px solid var(--muted); border-radius: 8px; background: transparent; color: var(--text); font: inherit; font-size: 17px; font-weight: 800; cursor: pointer; }
+.set-head.current { border-left-color: var(--accent); color: var(--accent); }
+
 /* 確認・名前の入力の窓 */
 .ask { width: min(92vw, 480px); padding: 20px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); color: var(--text); }
 .ask::backdrop { background: rgba(0, 0, 0, 0.5); }

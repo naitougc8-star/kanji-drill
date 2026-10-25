@@ -706,43 +706,79 @@ function contextHtml(w) {
 }
 
 /** 選んでいるテストの語を、写真ごとのまとまりに分けて表示する */
+/**
+ * 語の一覧に出すテスト: チェックを入れたテスト(出題するテスト)と、選んでいるテスト(チェックがなくても、直せるように)。
+ * ツリーと同じ順番。
+ */
+function listSets() {
+  const ids = new Set([...drillSetIds(), state.currentSet]);
+  return state.sets.filter((s) => ids.has(s.id));
+}
+
+/** 語の一覧に出す語 */
+function listWords() {
+  const ids = new Set(listSets().map((s) => s.id));
+  return state.words.filter((w) => ids.has(w.setId));
+}
+
+/** 語の一覧: テストごと(いくつか出すときは、テストの見出しを付ける)に、写真ごとのまとまりで出す */
 function renderWordList() {
   renderSets();
   const box = $('word-list');
   box.textContent = '';
-  for (const g of groupsOf(state.words, state.currentSet)) {
-    box.append(groupHead(g));
-    const ul = document.createElement('ul');
-    ul.dataset.group = g.key;
-    ul.hidden = groupClosed(g.key);
-    for (const w of g.words) ul.appendChild(wordRow(w));
-    box.appendChild(ul);
+  const sets = listSets();
+  const drill = new Set(drillSetIds());
+  for (const set of sets) {
+    if (sets.length > 1) box.append(setHead(set, drill.has(set.id)));
+    for (const g of groupsOf(state.words, set.id)) {
+      box.append(groupHead(g, set));
+      const ul = document.createElement('ul');
+      ul.dataset.group = g.key;
+      ul.dataset.set = set.id;
+      ul.hidden = groupClosed(set, g.key);
+      for (const w of g.words) ul.appendChild(wordRow(w));
+      box.appendChild(ul);
+    }
   }
   updateCount();
 }
 
+/** 語の一覧の、テストの見出し(タップでそのテストを選ぶ) */
+function setHead(set, inDrill) {
+  const head = document.createElement('button');
+  head.type = 'button';
+  head.className = 'set-head' + (set.id === state.currentSet ? ' current' : '');
+  head.dataset.set = set.id;
+  const n = wordsOf(state.words, set.id).length;
+  head.textContent = `${set.folder ? `📁 ${set.folder} / ` : ''}${set.name}(${n} 語)${inDrill ? '' : ' … チェックが入っていないので、出題しません'}`;
+  head.title = 'タップして、このテストを選ぶ(取り込んだ語を入れるテスト)';
+  head.addEventListener('click', () => selectSet(set.id));
+  return head;
+}
+
 /** 写真ごとのまとまりの開け閉めを覚えるときの名前(テストごと) */
-function groupFoldKey(groupKey) {
-  return `${state.currentSet}:${groupKey}`;
+function groupFoldKey(set, groupKey) {
+  return `${set.id}:${groupKey}`;
 }
 
 /** 写真ごとのまとまりを閉じているか(初めは開いている) */
-function groupClosed(groupKey) {
-  return state.settings.groupFolds.includes(groupFoldKey(groupKey));
+function groupClosed(set, groupKey) {
+  return state.settings.groupFolds.includes(groupFoldKey(set, groupKey));
 }
 
 /** 写真ごとのまとまりの見出し(開け閉め、まとめて出題する・しない、まとめて削除) */
-function groupHead(g) {
+function groupHead(g, set) {
   const head = document.createElement('div');
   head.className = 'group-head';
   head.dataset.group = g.key;
-  const label = groupLabel(g);
+  head.dataset.set = set.id;
+  const label = groupLabelOf(set, g);
   const name = document.createElement('button');
   name.type = 'button';
   name.className = 'gname';
   name.textContent = label;
   name.title = 'タップして名前を変える(12 文字まで)';
-  name.addEventListener('click', () => renameGroup(g));
+  name.addEventListener('click', () => renameGroup(g, set));
   const count = document.createElement('span');
   count.className = 'gcount';
   count.textContent = `${g.words.length} 問`;
@@ -789,11 +825,11 @@ function groupHead(g) {
   const fold = document.createElement('button');
   fold.type = 'button';
   fold.className = 'gfold';
-  const open = !groupClosed(g.key);
+  const open = !groupClosed(set, g.key);
   fold.setAttribute('aria-expanded', open ? 'true' : 'false');
   fold.setAttribute('aria-label', `${label}の語を${open ? '閉じる' : '開く'}`);
   fold.addEventListener('click', () => {
-    const key = groupFoldKey(g.key);
+    const key = groupFoldKey(set, g.key);
     const closed = new Set(state.settings.groupFolds);
     if (closed.has(key)) closed.delete(key);
     else closed.add(key);
@@ -809,10 +845,6 @@ function groupHead(g) {
 }
 
 /** 写真ごとのまとまりの名前(名前を変えていれば、その名前) */
-function groupLabel(g) {
-  return groupLabelOf(state.sets.find((x) => x.id === state.currentSet), g);
-}
-
 function groupLabelOf(set, g) {
   return (set && set.groupNames && set.groupNames[g.key]) || g.label;
 }
@@ -820,10 +852,9 @@ function groupLabelOf(set, g) {
 const GROUP_NAME_MAX = 12;
 
 /** 写真ごとのまとまりの名前を変える(12 文字まで。空にすると「写真 1」などに戻る) */
-async function renameGroup(g) {
-  const set = state.sets.find((x) => x.id === state.currentSet);
+async function renameGroup(g, set) {
   if (!set) return;
-  const input = await ask(`「${groupLabel(g)}」の新しい名前(${GROUP_NAME_MAX} 文字まで。空にすると「${g.label}」に戻ります)`, groupLabel(g));
+  const input = await ask(`「${groupLabelOf(set, g)}」の新しい名前(${GROUP_NAME_MAX} 文字まで。空にすると「${g.label}」に戻ります)`, groupLabelOf(set, g));
   if (input === null) return;
   const name = input.trim();
   if ([...name].length > GROUP_NAME_MAX) {
@@ -1044,11 +1075,6 @@ function questionText(w) {
   return w.reading;
 }
 
-/** 選んでいるテスト(一覧で直しているテスト)の、出題する語(チェックが入っていて、出題できる) */
-function setPlayable() {
-  return setWords().filter((w) => w.enabled && canPlay(w));
-}
-
 /** 出題するテスト(ツリーでチェックを入れたテスト)。まだ選んでいなければ、選んでいるテスト */
 function drillSetIds() {
   const stored = state.settings.drillSets;
@@ -1190,7 +1216,7 @@ function renderSets() {
   }
   const n = setWords().length, photos = photoCount(state.words, state.currentSet);
   $('set-info').textContent = `「${currentSetName()}」: ${n} 語(写真 ${photos} 枚)`;
-  $('set-name-inline').textContent = `「${currentSetName()}」`;
+  $('set-name-inline').textContent = listSets().map((s) => `「${s.name}」`).join('');
   $('btn-set-delete').disabled = false;
   renderStorage();
 }
@@ -1374,8 +1400,8 @@ function updateCount() {
   const list = playable();
   const n = list.length;
   const wrong = list.filter((w) => w.result === 'fail').length;
-  const mine = setPlayable();
-  $('word-count').textContent = `出題する語: ${mine.length} / ${setWords().length}`;
+  const drill = new Set(drillSetIds());
+  $('word-count').textContent = `出題する語: ${n} / ${state.words.filter((w) => drill.has(w.setId)).length}`;
   const titles = drillSetIds().map((id) => state.sets.find((s) => s.id === id)).filter(Boolean).map((s) => `「${s.name}」`);
   $('drill-scope').textContent = titles.length ? `出題するテスト: ${titles.join('')}` : '出題するテストが選ばれていません(上のテストのチェックを入れてください)';
   $('btn-start').disabled = n === 0;
@@ -1391,8 +1417,8 @@ function updateCount() {
   // 区分ごとの集計: 「出題する」にチェックの入っている語が分母(チェックを変えるたびに計算し直す)
   const sum = $('result-summary');
   sum.textContent = '';
-  sum.appendChild(statsView(mine).box);
-  $('btn-reset-results').disabled = setWords().filter(canPlay).every((w) => statusOf(w) === 'none');
+  sum.appendChild(statsView(list).box);
+  $('btn-reset-results').disabled = listWords().filter(canPlay).every((w) => statusOf(w) === 'none');
 }
 
 /**
@@ -2274,7 +2300,7 @@ function init() {
   });
   $('btn-extract').addEventListener('click', onExtract);
   $('btn-all').addEventListener('click', () => {
-    for (const w of setWords()) {
+    for (const w of listWords()) {
       w.enabled = true;
       w.updatedAt = Date.now();
     }
@@ -2282,7 +2308,7 @@ function init() {
     renderWordList();
   });
   $('btn-none').addEventListener('click', () => {
-    for (const w of setWords()) {
+    for (const w of listWords()) {
       w.enabled = false;
       w.updatedAt = Date.now();
     }
@@ -2333,8 +2359,9 @@ function init() {
   $('sanko-close').addEventListener('click', closeSanko);
   $('sanko').addEventListener('close', () => ($('sanko-frame').src = 'about:blank'));
   $('btn-reset-results').addEventListener('click', async () => {
-    if (!(await ask(`「${currentSetName()}」の合格・不合格の記録をすべて消しますか?`))) return;
-    resetResults(setWords());
+    const names = listSets().map((s) => `「${s.name}」`).join('');
+    if (!(await ask(`${names}の合格・不合格の記録をすべて消しますか?`))) return;
+    resetResults(listWords());
   });
 
   $('btn-undo').addEventListener('click', onUndo);

@@ -515,9 +515,10 @@ test('テスト(出題の範囲)ごとに語をまとめる: 作る・名前を�
   await page.click('#btn-quit');
   await confirmAsk(page);
 
-  // 中間テストを選ぶと、一覧は中間テストの語。出題は、チェックを入れたテストから(まだ期末テストだけ)
+  // 中間テストを選ぶと、一覧に中間テストの語も出る(チェックがないので出題しない)。出題は、チェックを入れたテストから(まだ期末テストだけ)
   await page.locator('#set-tree .tree-name', { hasText: '1 学期 中間テスト' }).click();
-  expect(await page.locator('#word-list li input.w').evaluateAll((els) => els.map((e) => e.value))).toEqual(['海', '山', '登る', '川']);
+  expect(await page.locator('#word-list li input.w').evaluateAll((els) => els.map((e) => e.value))).toEqual(['海', '山', '登る', '川', '空']);
+  await expect(page.locator('#word-list .set-head')).toHaveText(['1 学期 中間テスト(4 語) … チェックが入っていないので、出題しません', '1 学期 期末テスト(1 語)']);
   await expect(page.locator('#btn-start')).toHaveText('全問出題する(1 語)');
   // 両方にチェックを入れると、まとめて出題する
   await page.locator('#set-tree .tree-set').first().locator('.tree-check').check();
