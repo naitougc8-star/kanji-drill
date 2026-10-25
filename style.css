@@ -390,6 +390,22 @@ details.fold > summary:focus-visible { outline: 2px solid var(--accent); outline
 .sanko-note { margin: 0; padding: 4px 12px; font-size: 13px; color: var(--muted); }
 .sanko-note a { color: inherit; }
 
+/* テストのツリー(テスト → 写真ごとのまとまり。チェックを入れたものから出題) */
+.set-tree { list-style: none; margin: 8px 0; padding: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.tree-set + .tree-set { border-top: 1px solid var(--line); }
+.tree-row { display: flex; align-items: center; gap: 8px; padding: 4px 10px; min-height: 48px; }
+.tree-set.current > .tree-row { background: var(--btn); box-shadow: inset 5px 0 0 var(--accent); }
+.tree-toggle { border: 0; background: transparent; color: var(--muted); font-size: 14px; width: 32px; min-height: 40px; cursor: pointer; }
+.tree-check, .tree-group input { width: 24px; height: 24px; accent-color: var(--accent); flex-shrink: 0; }
+.tree-name { border: 0; background: transparent; color: inherit; font: inherit; font-size: 17px; font-weight: 700; text-align: left; padding: 6px 4px; cursor: pointer; flex: 0 1 auto; }
+.tree-set.current .tree-name { color: var(--accent); }
+.tree-count { color: var(--muted); font-size: 14px; white-space: nowrap; }
+.tree-groups { list-style: none; margin: 0; padding: 0 0 6px 50px; }
+.tree-group label { display: flex; align-items: center; gap: 8px; min-height: 40px; }
+.tree-group input:disabled + .tree-gname { color: var(--muted); }
+.tree-empty { color: var(--muted); font-size: 14px; padding: 6px 0; }
+.drill-scope { margin: 4px 0 0; }
+
 /* 確認・名前の入力の窓 */
 .ask { width: min(92vw, 480px); padding: 20px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); color: var(--text); }
 .ask::backdrop { background: rgba(0, 0, 0, 0.5); }

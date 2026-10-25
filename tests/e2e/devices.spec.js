@@ -123,6 +123,11 @@ for (const name of DEVICES) {
     await yomiRow.locator('.ctx-edit').tap();
     await confirmAsk(page, '不安に苛まれる');
     await expect(yomiRow.locator('.ctx')).toHaveText('不安に苛まれる');
+    // 語を消すときは確認する(キャンセルすれば消えない)
+    await kakiRow.locator('.del').tap();
+    await expect(page.locator('#ask-text')).toContainText('「満員」(まんいん)を一覧から消しますか');
+    await page.locator('#ask-cancel').tap();
+    await expect(kakiRow).toHaveCount(1);
     // 写真のまとまりの名前を変える(12 文字まで)。数は「問」
     const g1 = page.locator('.group-head[data-group="1"]');
     await expect(g1.locator('.gcount')).toHaveText('2 問');

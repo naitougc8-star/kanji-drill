@@ -28,6 +28,13 @@ function watch(page, baseURL) {
   return problems;
 }
 
+/** テストのツリーの、テストの名前と語の数の並び(例: ['中間テスト(2 語)']) */
+async function treeSets(page) {
+  return page.locator('#set-tree .tree-set > .tree-row').evaluateAll((rows) =>
+    rows.map((r) => r.querySelector('.tree-name').textContent + r.querySelector('.tree-count').textContent),
+  );
+}
+
 /** 取り込み方を「文章(漢字を含む文)」にする(初期値は「問題プリント」) */
 async function useTextMode(page) {
   await page.locator('label', { hasText: '文章(漢字を含む文)' }).click();
@@ -467,14 +474,14 @@ test('テスト(出題の範囲)ごとに語をまとめる: 作る・名前を�
   });
   await page.reload();
   await expect(page.locator('body')).toHaveAttribute('data-ready', '1');
-  await expect(page.locator('#set-select option')).toHaveText(['テスト 1(1 語)']);
+  await expect.poll(() => treeSets(page)).toEqual(['テスト 1(1 語)']);
   await expect(page.locator('.group-head .gname')).toHaveText(['以前に取り込んだ語']);
   await expect(page.locator('#word-list li[data-word="海"] .res')).toHaveText('○ 2 回目で合格');
 
   // 名前を変える
   await page.click('#btn-set-rename');
   await confirmAsk(page, '1 学期 中間テスト');
-  await expect(page.locator('#set-select option')).toHaveText(['1 学期 中間テスト(1 語)']);
+  await expect.poll(() => treeSets(page)).toEqual(['1 学期 中間テスト(1 語)']);
   await expect(page.locator('#set-name-inline')).toHaveText('「1 学期 中間テスト」');
 
   // 文章から取り込むと「写真 1」、手で追加すると「手で追加した語」
@@ -491,8 +498,10 @@ test('テスト(出題の範囲)ごとに語をまとめる: 作る・名前を�
   // 新しいテストを作ると、そちらに切り替わり、語の一覧は空
   await page.click('#btn-set-new');
   await confirmAsk(page, '1 学期 期末テスト');
-  await expect(page.locator('#set-select')).toHaveValue(/.+/);
-  await expect(page.locator('#set-select option:checked')).toHaveText('1 学期 期末テスト(0 語)');
+  await expect(page.locator('#set-tree .tree-set.current .tree-name')).toHaveText('1 学期 期末テスト');
+  // 新しいテストだけにチェックが入る
+  await expect(page.locator('#set-tree .tree-set .tree-check')).toHaveCount(2);
+  expect(await page.locator('#set-tree .tree-set .tree-check').evaluateAll((els) => els.map((e) => e.checked))).toEqual([false, true]);
   await expect(page.locator('#word-list li')).toHaveCount(0);
   await expect(page.locator('#btn-start')).toBeDisabled();
   await page.fill('#add-word', '空');
@@ -506,24 +515,37 @@ test('テスト(出題の範囲)ごとに語をまとめる: 作る・名前を�
   await page.click('#btn-quit');
   await confirmAsk(page);
 
-  // 中間テストに戻すと、中間テストの語だけ
-  await page.locator('#set-select').selectOption({ label: '1 学期 中間テスト(4 語)' });
+  // 中間テストを選ぶと、一覧は中間テストの語。出題は、チェックを入れたテストから(まだ期末テストだけ)
+  await page.locator('#set-tree .tree-name', { hasText: '1 学期 中間テスト' }).click();
   expect(await page.locator('#word-list li input.w').evaluateAll((els) => els.map((e) => e.value))).toEqual(['海', '山', '登る', '川']);
+  await expect(page.locator('#btn-start')).toHaveText('全問出題する(1 語)');
+  // 両方にチェックを入れると、まとめて出題する
+  await page.locator('#set-tree .tree-set').first().locator('.tree-check').check();
+  await expect(page.locator('#btn-start')).toHaveText('全問出題する(5 語)');
+  await expect(page.locator('#drill-scope')).toHaveText('出題するテスト: 「1 学期 中間テスト」「1 学期 期末テスト」');
+  await page.click('#btn-start');
+  await expect(page.locator('#progress')).toContainText('「1 学期 中間テスト」ほか 1 件');
+  await expect(page.locator('#progress')).toContainText('1 / 5 問');
+  await page.click('#btn-quit');
+  await confirmAsk(page);
+  // 期末テストのチェックを外すと、中間テストだけ
+  await page.locator('#set-tree .tree-set').nth(1).locator('.tree-check').uncheck();
   await expect(page.locator('#btn-start')).toHaveText('全問出題する(4 語)');
-  // 写真のまとまりごとに、出題する・しないを切り替える
-  await page.locator('.group-head[data-group="1"] input[type="checkbox"]').uncheck();
+  // 写真のまとまりごとに、出題する・しないを切り替える(ツリーの写真のチェックと、一覧の見出しのチェックは同じ)
+  await page.locator('#set-tree .tree-set').first().locator('.tree-group[data-group="1"] input').uncheck();
+  await expect(page.locator('.group-head[data-group="1"] input[type="checkbox"]')).not.toBeChecked();
   await expect(page.locator('#btn-start')).toHaveText('全問出題する(2 語)');
 
   // 再読み込みしても、選んでいるテストと語は残る
   await page.reload();
-  await expect(page.locator('#set-select option:checked')).toHaveText('1 学期 中間テスト(4 語)');
+  await expect(page.locator('#set-tree .tree-set.current .tree-name')).toHaveText('1 学期 中間テスト');
   await expect(page.locator('#btn-start')).toHaveText('全問出題する(2 語)');
 
   // 期末テストを削除すると、その語も消える
-  await page.locator('#set-select').selectOption({ label: '1 学期 期末テスト(1 語)' });
+  await page.locator('#set-tree .tree-name', { hasText: '1 学期 期末テスト' }).click();
   await page.click('#btn-set-delete');
   await confirmAsk(page);
-  await expect(page.locator('#set-select option')).toHaveText(['1 学期 中間テスト(4 語)']);
+  await expect.poll(() => treeSets(page)).toEqual(['1 学期 中間テスト(4 語)']);
   const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('kakitori-drill.v1')).words.map((w) => w.word));
   expect(stored).not.toContain('空');
 
@@ -583,7 +605,7 @@ test('バックアップ: iPad で書き出したファイルを iPhone で読�
   const iphone = await open();
   await iphone.page.setInputFiles('#import-merge', fromIpad);
   await expect(iphone.page.locator('#backup-status')).toContainText('テスト 1 件と語 2 語を追加し');
-  await expect(iphone.page.locator('#set-select option')).toHaveText(['中間テスト(2 語)']);
+  await expect.poll(() => treeSets(iphone.page)).toEqual(['中間テスト(2 語)']);
   await expect(iphone.page.locator('#word-list li[data-word="山"] .res')).toHaveText('○ 1 回目で合格');
 
   // iPhone で 川 を間違える → 書き出す
@@ -598,7 +620,7 @@ test('バックアップ: iPad で書き出したファイルを iPhone で読�
   await expect(ipad.page.locator('#backup-status')).toContainText('1 語を新しい方の成績に更新しました');
   await expect(ipad.page.locator('#word-list li[data-word="川"] .res')).toHaveText('× 1 回まちがい');
   await expect(ipad.page.locator('#word-list li[data-word="山"] .res')).toHaveText('○ 1 回目で合格');
-  await expect(ipad.page.locator('#set-select option')).toHaveText(['中間テスト(2 語)']); // 同じテストは 1 つにまとまる
+  await expect.poll(() => treeSets(ipad.page)).toEqual(['中間テスト(2 語)']); // 同じテストは 1 つにまとまる
 
   // 置き換える(確認あり)
   await ipad.page.setInputFiles('#import-replace', fromIpad);

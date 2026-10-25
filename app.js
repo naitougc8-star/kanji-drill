@@ -22,7 +22,7 @@ const state = {
   words: [],
   sets: [], // テスト(出題の範囲)
   currentSet: null, // 選んでいるテスト
-  settings: { level: DEFAULT_LEVEL, checkOrder: false, vertical: false, srcMode: 'print', theme: 'auto', folds: {}, groupFolds: [] },
+  settings: { level: DEFAULT_LEVEL, checkOrder: false, vertical: false, srcMode: 'print', theme: 'auto', folds: {}, groupFolds: [], drillSets: null, treeOpen: null },
   session: null,
 };
 
@@ -86,6 +86,9 @@ function restoreSaved() {
     }
     // 閉じている写真のまとまり(「テストの id:まとまり」)
     if (Array.isArray(saved.settings.groupFolds)) state.settings.groupFolds = saved.settings.groupFolds.filter((k) => typeof k === 'string');
+    // 出題するテスト(チェックを入れたテスト)と、ツリーで開いているテスト
+    if (Array.isArray(saved.settings.drillSets)) state.settings.drillSets = saved.settings.drillSets.filter((k) => typeof k === 'string');
+    if (Array.isArray(saved.settings.treeOpen)) state.settings.treeOpen = saved.settings.treeOpen.filter((k) => typeof k === 'string');
   }
 }
 
@@ -807,7 +810,10 @@ function groupHead(g) {
 
 /** 写真ごとのまとまりの名前(名前を変えていれば、その名前) */
 function groupLabel(g) {
-  const set = state.sets.find((x) => x.id === state.currentSet);
+  return groupLabelOf(state.sets.find((x) => x.id === state.currentSet), g);
+}
+
+function groupLabelOf(set, g) {
   return (set && set.groupNames && set.groupNames[g.key]) || g.label;
 }
 
@@ -925,7 +931,8 @@ function wordRow(w) {
   del.className = 'btn del';
   del.textContent = '×';
   del.setAttribute('aria-label', `「${w.word}」を一覧から消す`);
-  del.addEventListener('click', () => {
+  del.addEventListener('click', async () => {
+    if (!(await ask(`「${w.word}」(${w.reading || '読みなし'})を一覧から消しますか? 成績も消えます。`))) return;
     state.words = state.words.filter((x) => x !== w);
     persist();
     renderWordList();
@@ -1037,9 +1044,32 @@ function questionText(w) {
   return w.reading;
 }
 
-/** 出題できる語(選んでいるテストの中で、チェックが入っていて、出題できる) */
-function playable() {
+/** 選んでいるテスト(一覧で直しているテスト)の、出題する語(チェックが入っていて、出題できる) */
+function setPlayable() {
   return setWords().filter((w) => w.enabled && canPlay(w));
+}
+
+/** 出題するテスト(ツリーでチェックを入れたテスト)。まだ選んでいなければ、選んでいるテスト */
+function drillSetIds() {
+  const stored = state.settings.drillSets;
+  if (!Array.isArray(stored)) return [state.currentSet];
+  const ids = new Set(state.sets.map((s) => s.id));
+  const list = stored.filter((id) => ids.has(id));
+  // チェックしていたテストが削除・置き換えでなくなったら、選んでいるテスト(全部外したときは、どれからも出題しない)
+  return !list.length && stored.length ? [state.currentSet] : list;
+}
+
+/** 出題できる語(チェックを入れたテストの中で、チェックが入っていて、出題できる) */
+function playable() {
+  const ids = new Set(drillSetIds());
+  return state.words.filter((w) => ids.has(w.setId) && w.enabled && canPlay(w));
+}
+
+/** 出題するテストの名前(出題画面の見出し) */
+function drillTitle() {
+  const names = state.sets.filter((s) => drillSetIds().includes(s.id)).map((s) => s.name);
+  if (!names.length) return '';
+  return names.length === 1 ? `「${names[0]}」` : `「${names[0]}」ほか ${names.length - 1} 件`;
 }
 
 function currentSetName() {
@@ -1053,17 +1083,103 @@ function addedText(added) {
   return `「${currentSetName()}」に ${added} 語を追加しました。`;
 }
 
-/** テストの選択欄と、テストの情報を表示する */
+/**
+ * テストのツリーと、テストの情報を表示する。
+ * テスト: [開け閉め][出題するチェック][名前(タップで選ぶ)][語の数] → 写真ごとのまとまり: [出題するチェック][名前][問の数]
+ */
 function renderSets() {
-  const sel = $('set-select');
-  sel.textContent = '';
+  const tree = $('set-tree');
+  tree.textContent = '';
+  const drill = new Set(drillSetIds());
+  const open = new Set(state.settings.treeOpen || [state.currentSet]);
   for (const set of state.sets) {
-    const o = document.createElement('option');
-    o.value = set.id;
-    o.textContent = `${set.name}(${wordsOf(state.words, set.id).length} 語)`;
-    sel.appendChild(o);
+    const words = wordsOf(state.words, set.id);
+    const li = document.createElement('li');
+    li.className = 'tree-set' + (set.id === state.currentSet ? ' current' : '');
+    li.dataset.set = set.id;
+    li.setAttribute('role', 'treeitem');
+    li.setAttribute('aria-expanded', open.has(set.id) ? 'true' : 'false');
+    const row = document.createElement('div');
+    row.className = 'tree-row';
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'tree-toggle';
+    toggle.textContent = open.has(set.id) ? '▼' : '▶';
+    toggle.setAttribute('aria-label', `「${set.name}」の写真を${open.has(set.id) ? '閉じる' : '開く'}`);
+    toggle.addEventListener('click', () => {
+      if (open.has(set.id)) open.delete(set.id);
+      else open.add(set.id);
+      state.settings.treeOpen = [...open];
+      persist();
+      renderSets();
+    });
+    const check = document.createElement('input');
+    check.type = 'checkbox';
+    check.className = 'tree-check';
+    check.checked = drill.has(set.id);
+    check.setAttribute('aria-label', `「${set.name}」から出題する`);
+    check.addEventListener('change', () => {
+      const next = new Set(drillSetIds());
+      if (check.checked) next.add(set.id);
+      else next.delete(set.id);
+      state.settings.drillSets = state.sets.map((s) => s.id).filter((id) => next.has(id));
+      persist();
+      renderWordList();
+    });
+    const name = document.createElement('button');
+    name.type = 'button';
+    name.className = 'tree-name';
+    name.textContent = set.name;
+    name.setAttribute('aria-current', set.id === state.currentSet ? 'true' : 'false');
+    name.title = 'タップして、このテストを選ぶ(下の一覧で直す・取り込んだ語を入れる)';
+    name.addEventListener('click', () => selectSet(set.id));
+    const count = document.createElement('span');
+    count.className = 'tree-count';
+    count.textContent = `(${words.length} 語)`;
+    row.append(toggle, check, name, count);
+    li.appendChild(row);
+    if (open.has(set.id)) {
+      const ul = document.createElement('ul');
+      ul.className = 'tree-groups';
+      ul.setAttribute('role', 'group');
+      for (const g of groupsOf(state.words, set.id)) {
+        const gl = document.createElement('li');
+        gl.className = 'tree-group';
+        gl.dataset.group = g.key;
+        const label = document.createElement('label');
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = g.words.every((w) => w.enabled);
+        cb.indeterminate = !cb.checked && g.words.some((w) => w.enabled);
+        cb.disabled = !drill.has(set.id);
+        cb.addEventListener('change', () => {
+          for (const w of g.words) {
+            w.enabled = cb.checked;
+            w.updatedAt = Date.now();
+          }
+          persist();
+          renderWordList();
+        });
+        const t = document.createElement('span');
+        t.className = 'tree-gname';
+        t.textContent = groupLabelOf(set, g);
+        const n = document.createElement('span');
+        n.className = 'tree-count';
+        n.textContent = `(${g.words.length} 問)`;
+        label.append(cb, t, n);
+        gl.appendChild(label);
+        ul.appendChild(gl);
+      }
+      if (!ul.children.length) {
+        const empty = document.createElement('li');
+        empty.className = 'tree-empty';
+        empty.textContent = 'まだ語がありません';
+        ul.appendChild(empty);
+      }
+      li.appendChild(ul);
+    }
+    tree.appendChild(li);
   }
-  sel.value = state.currentSet;
   const n = setWords().length, photos = photoCount(state.words, state.currentSet);
   $('set-info').textContent = `「${currentSetName()}」: ${n} 語(写真 ${photos} 枚)`;
   $('set-name-inline').textContent = `「${currentSetName()}」`;
@@ -1071,8 +1187,14 @@ function renderSets() {
   renderStorage();
 }
 
-function onSetChange() {
-  state.currentSet = $('set-select').value;
+/** テストを選ぶ(下の一覧で直す・取り込んだ語を入れるテスト) */
+function selectSet(id) {
+  if (id === state.currentSet) return;
+  state.currentSet = id;
+  // 選んだテストは、ツリーで開く
+  const open = new Set(state.settings.treeOpen || []);
+  open.add(id);
+  state.settings.treeOpen = [...open];
   printItems = [];
   renderPrintItems();
   persist();
@@ -1084,6 +1206,8 @@ async function onSetNew() {
   if (name === null) return;
   const set = createSet(state.sets, name);
   state.currentSet = set.id;
+  state.settings.drillSets = [set.id]; // 新しいテストから出題する(ほかのテストのチェックは外す)
+  state.settings.treeOpen = [...new Set([...(state.settings.treeOpen || []), set.id])];
   printItems = [];
   renderPrintItems();
   persist();
@@ -1117,7 +1241,10 @@ function updateCount() {
   const list = playable();
   const n = list.length;
   const wrong = list.filter((w) => w.result === 'fail').length;
-  $('word-count').textContent = `出題する語: ${n} / ${setWords().length}`;
+  const mine = setPlayable();
+  $('word-count').textContent = `出題する語: ${mine.length} / ${setWords().length}`;
+  const titles = drillSetIds().map((id) => state.sets.find((s) => s.id === id)).filter(Boolean).map((s) => `「${s.name}」`);
+  $('drill-scope').textContent = titles.length ? `出題するテスト: ${titles.join('')}` : '出題するテストが選ばれていません(上のテストのチェックを入れてください)';
   $('btn-start').disabled = n === 0;
   $('btn-start').textContent = `全問出題する(${n} 語)`;
   $('btn-start-wrong').disabled = wrong === 0;
@@ -1131,7 +1258,7 @@ function updateCount() {
   // 区分ごとの集計: 「出題する」にチェックの入っている語が分母(チェックを変えるたびに計算し直す)
   const sum = $('result-summary');
   sum.textContent = '';
-  sum.appendChild(statsView(list).box);
+  sum.appendChild(statsView(mine).box);
   $('btn-reset-results').disabled = setWords().filter(canPlay).every((w) => statusOf(w) === 'none');
 }
 
@@ -1242,7 +1369,7 @@ function startSession(which = 'all') {
     showMessage({ wrong: '不合格の語はありません。', miss3: '3 回以上間違えた語はありません。', new: '未出題の語はありません。' }[which] || '出題する語がありません。');
     return;
   }
-  state.session = { history: [], round: 0 };
+  state.session = { history: [], round: 0, title: drillTitle() };
   startRound(ids);
 }
 
@@ -1288,7 +1415,7 @@ async function renderQuestion() {
   current = { word: w, judged: false, autoPass: false, manualPass: false, selfPending: false, selfOk: null };
 
   const kind = kindOf(w);
-  $('progress').textContent = `「${currentSetName()}」 ${s.round} 回目 ${s.index + 1} / ${s.queue.length} 問`;
+  $('progress').textContent = `${s.title} ${s.round} 回目 ${s.index + 1} / ${s.queue.length} 問`;
   const reading = $('reading');
   reading.textContent = kind === 'kaki' ? w.reading || '(読みなし)' : questionText(w) + (kind === 'hyakunin' ? ' …' : '');
   reading.dataset.kind = kind;
@@ -2036,7 +2163,6 @@ function init() {
     $('add-reading').placeholder = { kaki: '読み(例: おぼえる)', yomi: '答えの読み(空なら辞書で引きます)', hyakunin: '(入力しなくてよい)' }[k];
     $('add-reading').disabled = k === 'hyakunin';
   });
-  $('set-select').addEventListener('change', onSetChange);
   $('btn-set-new').addEventListener('click', onSetNew);
   $('btn-set-rename').addEventListener('click', onSetRename);
   $('btn-set-delete').addEventListener('click', onSetDelete);

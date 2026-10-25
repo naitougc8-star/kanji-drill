@@ -38,9 +38,12 @@
     <section id="screen-setup" class="screen">
       <div class="card set-card">
         <h2>テスト(出題の範囲)</h2>
-        <p class="hint">中間テスト・期末テストなど、テストごとに語をまとめます。取り込んだ語は、ここで選んでいるテストに入り、出題もこのテストの中からだけ行います。</p>
+        <p class="hint">
+          中間テスト・期末テストなど、テストごとに語をまとめます。<strong>テストの名前をタップ</strong>すると、そのテストを選び(取り込んだ語はそのテストに入ります)、下の一覧で語を直せます。
+          <strong>チェックを入れたテスト</strong>(と、その中のチェックを入れた写真)から出題します。いくつかのテストをまとめて出題することもできます。
+        </p>
+        <ul id="set-tree" class="set-tree" role="tree" aria-label="テスト"></ul>
         <div class="row">
-          <select id="set-select" class="set-select" aria-label="テストを選ぶ"></select>
           <button type="button" id="btn-set-new" class="btn">新しいテスト</button>
           <button type="button" id="btn-set-rename" class="btn">名前を変える</button>
           <button type="button" id="btn-set-delete" class="btn">削除</button>
@@ -168,6 +171,7 @@
             </span>
           </span>
         </div>
+        <p id="drill-scope" class="status drill-scope"></p>
         <div class="start-row">
           <button type="button" id="btn-start" class="btn primary big">全問出題する</button>
           <div class="start-sub">
