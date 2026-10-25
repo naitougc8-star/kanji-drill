@@ -404,6 +404,12 @@ details.fold > summary:focus-visible { outline: 2px solid var(--accent); outline
 .tree-group label { display: flex; align-items: center; gap: 8px; min-height: 40px; }
 .tree-group input:disabled + .tree-gname { color: var(--muted); }
 .tree-empty { color: var(--muted); font-size: 14px; padding: 6px 0; }
+/* フォルダー(テストをまとめる) */
+.tree-folder + .tree-set, .tree-set + .tree-folder, .tree-folder + .tree-folder { border-top: 1px solid var(--line); }
+.tree-folder > .tree-row { background: color-mix(in srgb, var(--btn) 60%, transparent); }
+.tree-folder-name { font-size: 17px; }
+.tree-folder-sets { list-style: none; margin: 0; padding: 0 0 0 28px; border-top: 1px solid var(--line); }
+.tree-folder-sets .tree-set + .tree-set { border-top: 1px solid var(--line); }
 .drill-scope { margin: 4px 0 0; }
 
 /* 確認・名前の入力の窓 */

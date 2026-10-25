@@ -74,4 +74,10 @@ describe('バックアップ', () => {
     );
     expect(r.sets[0].groupNames).toEqual({ 1: '吉野弘', 2: '芥川' });
   });
+  it('入れているフォルダーも、新しく変えた方を残す(新しい方で出していれば、出す)', () => {
+    const into = mergeBackup({ sets: [{ id: 's1', name: 'No.1', updatedAt: 1 }], words: [] }, { sets: [{ id: 's1', name: 'No.1', updatedAt: 2, folder: '2学期' }], words: [] });
+    expect(into.sets[0].folder).toBe('2学期');
+    const out = mergeBackup({ sets: [{ id: 's1', name: 'No.1', updatedAt: 1, folder: '2学期' }], words: [] }, { sets: [{ id: 's1', name: 'No.1', updatedAt: 2 }], words: [] });
+    expect(out.sets[0].folder).toBeUndefined();
+  });
 });

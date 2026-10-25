@@ -128,6 +128,22 @@ for (const name of DEVICES) {
     await expect(page.locator('#ask-text')).toContainText('「満員」(まんいん)を一覧から消しますか');
     await page.locator('#ask-cancel').tap();
     await expect(kakiRow).toHaveCount(1);
+    // テストをフォルダーに入れる → フォルダーのチェックで、中のテストをまとめて出題する・しない
+    await page.locator('#btn-set-folder').tap();
+    await confirmAsk(page, '2学期');
+    const folder = page.locator('#set-tree .tree-folder[data-folder="2学期"]');
+    await expect(folder.locator('.tree-folder-name')).toHaveText('📁 2学期');
+    await expect(folder.locator('.tree-count').first()).toHaveText('(テスト 1 件・3 語)');
+    await expect(folder.locator('.tree-set .tree-name')).toHaveText('2学期中間確認テスト');
+    await folder.locator('.tree-row .tree-check').first().uncheck();
+    await expect(page.locator('#btn-start')).toBeDisabled();
+    await folder.locator('.tree-row .tree-check').first().check();
+    await expect(page.locator('#btn-start')).toHaveText('全問出題する(3 語)');
+    await shot(page, '0-folder');
+    // フォルダーの名前を変える
+    await folder.locator('.tree-folder-name').tap();
+    await confirmAsk(page, '2学期のテスト');
+    await expect(page.locator('#set-tree .tree-folder-name')).toHaveText('📁 2学期のテスト');
     // 写真のまとまりの名前を変える(12 文字まで)。数は「問」
     const g1 = page.locator('.group-head[data-group="1"]');
     await expect(g1.locator('.gcount')).toHaveText('2 問');

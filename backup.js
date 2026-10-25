@@ -58,6 +58,8 @@ export function mergeBackup(cur, inc) {
     } else if ((s.updatedAt || 0) > (mine.updatedAt || 0)) {
       mine.name = s.name;
       if (s.groupNames) mine.groupNames = { ...s.groupNames }; // 写真ごとのまとまりの名前
+      if (s.folder) mine.folder = s.folder; // 入れているフォルダー(新しい方で出したなら、出す)
+      else delete mine.folder;
       mine.updatedAt = s.updatedAt;
     }
   }

@@ -1091,8 +1091,16 @@ function renderSets() {
   const tree = $('set-tree');
   tree.textContent = '';
   const drill = new Set(drillSetIds());
-  const open = new Set(state.settings.treeOpen || [state.currentSet]);
+  const cur = state.sets.find((s) => s.id === state.currentSet);
+  const open = new Set(state.settings.treeOpen || [state.currentSet, ...(cur && cur.folder ? [folderKey(cur.folder)] : [])]);
+  // フォルダーごとにまとめる(フォルダーに入っていないテストは、そのまま)。フォルダーは、中の最初のテストの位置に出す
+  const folders = new Map();
   for (const set of state.sets) {
+    let parent = tree;
+    if (set.folder) {
+      if (!folders.has(set.folder)) folders.set(set.folder, folderNode(set.folder, tree, drill, open));
+      parent = folders.get(set.folder);
+    }
     const words = wordsOf(state.words, set.id);
     const li = document.createElement('li');
     li.className = 'tree-set' + (set.id === state.currentSet ? ' current' : '');
@@ -1178,13 +1186,138 @@ function renderSets() {
       }
       li.appendChild(ul);
     }
-    tree.appendChild(li);
+    parent.appendChild(li);
   }
   const n = setWords().length, photos = photoCount(state.words, state.currentSet);
   $('set-info').textContent = `「${currentSetName()}」: ${n} 語(写真 ${photos} 枚)`;
   $('set-name-inline').textContent = `「${currentSetName()}」`;
   $('btn-set-delete').disabled = false;
   renderStorage();
+}
+
+function folderKey(name) {
+  return `folder:${name}`;
+}
+
+/**
+ * フォルダーの行を tree に足し、中のテストを入れる ul を返す(閉じているときは、画面に出さない ul)。
+ * [開け閉め][中のテストをまとめて出題するチェック][📁 名前(タップで名前を変える)][テストの数・語の数]
+ */
+function folderNode(name, tree, drill, open) {
+  const sets = state.sets.filter((s) => s.folder === name);
+  const nWords = state.words.filter((w) => sets.some((s) => s.id === w.setId)).length;
+  const key = folderKey(name);
+  const isOpen = open.has(key);
+  const li = document.createElement('li');
+  li.className = 'tree-folder';
+  li.dataset.folder = name;
+  li.setAttribute('role', 'treeitem');
+  li.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  const row = document.createElement('div');
+  row.className = 'tree-row';
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'tree-toggle';
+  toggle.textContent = isOpen ? '▼' : '▶';
+  toggle.setAttribute('aria-label', `フォルダー「${name}」を${isOpen ? '閉じる' : '開く'}`);
+  toggle.addEventListener('click', () => {
+    const next = new Set(state.settings.treeOpen || [...open]);
+    if (isOpen) next.delete(key);
+    else next.add(key);
+    state.settings.treeOpen = [...next];
+    persist();
+    renderSets();
+  });
+  const check = document.createElement('input');
+  check.type = 'checkbox';
+  check.className = 'tree-check';
+  const on = sets.filter((s) => drill.has(s.id)).length;
+  check.checked = on === sets.length;
+  check.indeterminate = on > 0 && on < sets.length;
+  check.setAttribute('aria-label', `フォルダー「${name}」のテストから出題する`);
+  check.addEventListener('change', () => {
+    const next = new Set(drillSetIds());
+    for (const s of sets) {
+      if (check.checked) next.add(s.id);
+      else next.delete(s.id);
+    }
+    state.settings.drillSets = state.sets.map((s) => s.id).filter((id) => next.has(id));
+    persist();
+    renderWordList();
+  });
+  const nameBtn = document.createElement('button');
+  nameBtn.type = 'button';
+  nameBtn.className = 'tree-name tree-folder-name';
+  nameBtn.textContent = `📁 ${name}`;
+  nameBtn.title = 'タップして、フォルダーの名前を変える';
+  nameBtn.addEventListener('click', () => renameFolder(name));
+  const count = document.createElement('span');
+  count.className = 'tree-count';
+  count.textContent = `(テスト ${sets.length} 件・${nWords} 語)`;
+  row.append(toggle, check, nameBtn, count);
+  li.appendChild(row);
+  const ul = document.createElement('ul');
+  ul.className = 'tree-folder-sets';
+  ul.setAttribute('role', 'group');
+  if (isOpen) li.appendChild(ul);
+  tree.appendChild(li);
+  return ul;
+}
+
+const FOLDER_NAME_MAX = 20;
+
+/** 今あるフォルダーの名前(出てくる順) */
+function folderNames() {
+  return [...new Set(state.sets.map((s) => s.folder).filter(Boolean))];
+}
+
+/** 選んでいるテストを、フォルダーに入れる(新しい名前なら、フォルダーを作る。空にすると、フォルダーから出す) */
+async function onSetFolder() {
+  const set = state.sets.find((s) => s.id === state.currentSet);
+  if (!set) return;
+  const names = folderNames();
+  const input = await ask(
+    `「${set.name}」を入れるフォルダーの名前(${FOLDER_NAME_MAX} 文字まで)。` +
+      (names.length ? `今あるフォルダー: ${names.map((n) => `「${n}」`).join('')}。` : '') +
+      '新しい名前なら、フォルダーを作ります。空にすると、フォルダーから出します。',
+    set.folder || names[0] || '',
+  );
+  if (input === null) return;
+  const name = input.trim();
+  if ([...name].length > FOLDER_NAME_MAX) {
+    showMessage(`フォルダーの名前は ${FOLDER_NAME_MAX} 文字までです。`);
+    return;
+  }
+  hideMessage();
+  if (name) set.folder = name;
+  else delete set.folder;
+  set.updatedAt = Date.now();
+  if (name) state.settings.treeOpen = [...new Set([...(state.settings.treeOpen || [state.currentSet]), folderKey(name)])];
+  persist();
+  renderWordList();
+}
+
+/** フォルダーの名前を変える(空にすると、フォルダーをなくす。中のテストは残る) */
+async function renameFolder(old) {
+  const input = await ask(`フォルダー「${old}」の新しい名前(${FOLDER_NAME_MAX} 文字まで。空にするとフォルダーをなくします。中のテストはそのまま残ります)`, old);
+  if (input === null) return;
+  const name = input.trim();
+  if ([...name].length > FOLDER_NAME_MAX) {
+    showMessage(`フォルダーの名前は ${FOLDER_NAME_MAX} 文字までです。`);
+    return;
+  }
+  hideMessage();
+  for (const s of state.sets) {
+    if (s.folder !== old) continue;
+    if (name) s.folder = name;
+    else delete s.folder;
+    s.updatedAt = Date.now();
+  }
+  if (state.settings.treeOpen) {
+    state.settings.treeOpen = state.settings.treeOpen.map((k) => (k === folderKey(old) && name ? folderKey(name) : k)).filter((k) => k !== folderKey(old));
+  }
+  persist();
+  renderWordList();
 }
 
 /** テストを選ぶ(下の一覧で直す・取り込んだ語を入れるテスト) */
@@ -2166,6 +2299,7 @@ function init() {
   $('btn-set-new').addEventListener('click', onSetNew);
   $('btn-set-rename').addEventListener('click', onSetRename);
   $('btn-set-delete').addEventListener('click', onSetDelete);
+  $('btn-set-folder').addEventListener('click', onSetFolder);
   $('btn-export').addEventListener('click', onExport);
   // データの渡し方: ファイル / QR コード
   for (const r of document.querySelectorAll('input[name="sync-mode"]')) {
