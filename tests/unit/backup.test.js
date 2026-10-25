@@ -80,4 +80,11 @@ describe('バックアップ', () => {
     const out = mergeBackup({ sets: [{ id: 's1', name: 'No.1', updatedAt: 1, folder: '2学期' }], words: [] }, { sets: [{ id: 's1', name: 'No.1', updatedAt: 2 }], words: [] });
     expect(out.sets[0].folder).toBeUndefined();
   });
+  it('作っただけのフォルダー(テストの入っていないフォルダー)も、書き出して合わせる', () => {
+    const inc = parseBackup(JSON.stringify(makeBackup([{ id: 's1', name: 'No.1' }], [], new Date(0), ['2学期', '3学期'])));
+    expect(inc.folders).toEqual(['2学期', '3学期']);
+    const r = mergeBackup({ sets: [], words: [], folders: ['1学期', '2学期'] }, inc);
+    expect(r.folders).toEqual(['1学期', '2学期', '3学期']);
+    expect(parseBackup(JSON.stringify(makeBackup([], [], new Date(0)))).folders).toEqual([]);
+  });
 });

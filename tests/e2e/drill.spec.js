@@ -493,7 +493,7 @@ test('テスト(出題の範囲)ごとに語をまとめる: 作る・名前を�
   await page.fill('#add-reading', 'かわ');
   await page.click('#add-form button');
   await expect(page.locator('.group-head .gname')).toHaveText(['以前に取り込んだ語', '写真 1', '手で追加した語']);
-  await expect(page.locator('#set-info')).toContainText('4 語(写真 1 枚)');
+  await expect(page.locator('#set-tree .tree-set.current > .tree-row .tree-count')).toHaveText('(4 語)');
 
   // 新しいテストを作ると、そちらに切り替わり、語の一覧は空
   await page.click('#btn-set-new');
@@ -542,9 +542,19 @@ test('テスト(出題の範囲)ごとに語をまとめる: 作る・名前を�
   await expect(page.locator('#set-tree .tree-set.current .tree-name')).toHaveText('1 学期 中間テスト');
   await expect(page.locator('#btn-start')).toHaveText('全問出題する(2 語)');
 
-  // 期末テストを削除すると、その語も消える
-  await page.locator('#set-tree .tree-name', { hasText: '1 学期 期末テスト' }).click();
+  // 写真のチェックを全部外すと、テストのチェックも外れる。テストにチェックを入れると、中の写真にもすべてチェックが入る
+  const mid = page.locator('#set-tree .tree-set').first();
+  for (const g of ['old', 'manual']) await mid.locator(`.tree-group[data-group="${g}"] input`).uncheck();
+  await expect(mid.locator('.tree-check')).not.toBeChecked();
+  await mid.locator('.tree-check').check();
+  expect(await mid.locator('.tree-group input').evaluateAll((els) => els.map((e) => e.checked))).toEqual([true, true, true]);
+  await expect(page.locator('#btn-start')).toHaveText('全問出題する(4 語)');
+
+  // 削除は、チェックを入れたテスト(期末テストだけにチェック)。その語も消える
+  await page.locator('#set-tree .tree-set').nth(1).locator('.tree-check').check();
+  await mid.locator('.tree-check').uncheck();
   await page.click('#btn-set-delete');
+  await expect(page.locator('#ask-text')).toContainText('チェックを入れた 「1 学期 期末テスト」 を削除しますか? テスト 1 件・1 語');
   await confirmAsk(page);
   await expect.poll(() => treeSets(page)).toEqual(['1 学期 中間テスト(4 語)']);
   const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('kakitori-drill.v1')).words.map((w) => w.word));
@@ -639,4 +649,35 @@ test('バックアップ: iPad で書き出したファイルを iPhone で読�
   expect(iphone.problems, iphone.problems.join('\n')).toEqual([]);
   await ipad.ctx.close();
   await iphone.ctx.close();
+});
+
+test('フォルダー: チェックを入れたフォルダーを、中のテストごと削除する(チェックのないテストは残る)', async ({ page }) => {
+  await page.goto('./');
+  await page.evaluate(() => {
+    localStorage.clear();
+    const w = (id, setId, word) => ({ id, setId, word, reading: 'よみ', enabled: true, photo: 1 });
+    localStorage.setItem('kakitori-drill.v1', JSON.stringify({
+      sets: [{ id: 'a', name: 'No.1', folder: '2学期' }, { id: 'b', name: 'No.2', folder: '2学期' }, { id: 'c', name: '期末' }],
+      folders: ['2学期', '空のフォルダー'],
+      words: [w('1', 'a', '海'), w('2', 'b', '山'), w('3', 'c', '川')],
+      currentSet: 'c',
+      settings: { drillSets: ['c'] },
+    }));
+  });
+  await page.reload();
+  await expect(page.locator('body')).toHaveAttribute('data-ready', '1');
+  // 作っただけのフォルダーも出る(チェックはできない)
+  await expect(page.locator('#set-tree .tree-folder[data-folder="空のフォルダー"] .tree-check')).toBeDisabled();
+  // フォルダーにチェック → 中のテストにもチェック
+  const folder = page.locator('#set-tree .tree-folder[data-folder="2学期"]');
+  await folder.locator('.tree-row .tree-check').first().check();
+  await page.locator('#set-tree .tree-set[data-set="c"] .tree-check').uncheck();
+  await page.click('#btn-set-delete');
+  await expect(page.locator('#ask-text')).toContainText('📁「2学期」(中のテスト 2 件ごと) を削除しますか? テスト 2 件・2 語');
+  await confirmAsk(page);
+  await expect(page.locator('#set-tree .tree-folder[data-folder="2学期"]')).toHaveCount(0);
+  await expect(page.locator('#set-tree .tree-set .tree-name')).toHaveText(['期末']);
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('kakitori-drill.v1')));
+  expect(stored.words.map((x) => x.word)).toEqual(['川']);
+  expect(stored.folders).toEqual(['空のフォルダー']);
 });

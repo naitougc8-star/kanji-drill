@@ -9,7 +9,7 @@ import { Marker } from './marker.js';
 import { extractTableColumns, fixKatakana, katakanaRuns } from './table.js';
 import { candidates, makeScorer, guessTarget, normalizeReading, lookupBrowser, commonKanji } from './yomi.js';
 import * as storage from './storage.js';
-import { migrate, wordsOf, photoCount, addWords, groupsOf, createSet, deleteSet } from './sets.js';
+import { migrate, wordsOf, addWords, groupsOf, createSet, deleteSet } from './sets.js';
 import { makeBackup, backupFileName, parseBackup, mergeBackup, dataSize, formatSize, STORAGE_LIMIT } from './backup.js';
 import { KIND_LABEL, kindOf, detectKind, isHeaderText, yomiWord, yomiParts } from './kinds.js';
 import { matchPoems, poemByNo, poemParts, checkKana, normalizeKana } from './hyakunin.js';
@@ -21,6 +21,7 @@ const state = {
   text: '',
   words: [],
   sets: [], // テスト(出題の範囲)
+  folders: [], // フォルダーの名前(テストの入っていない、作っただけのフォルダーも)
   currentSet: null, // 選んでいるテスト
   settings: { level: DEFAULT_LEVEL, checkOrder: false, vertical: false, srcMode: 'print', theme: 'auto', folds: {}, groupFolds: [], drillSets: null, treeOpen: null },
   session: null,
@@ -29,7 +30,7 @@ const state = {
 // ---------- 保存 ----------
 
 function persist() {
-  const ok = storage.save({ text: state.text, words: state.words, sets: state.sets, currentSet: state.currentSet, settings: state.settings });
+  const ok = storage.save({ text: state.text, words: state.words, sets: state.sets, folders: state.folders, currentSet: state.currentSet, settings: state.settings });
   if (!ok && !persist.warned) {
     persist.warned = true;
     showMessage('この端末に保存できませんでした(保存領域がいっぱいか、プライベートブラウズかもしれません)。「書き出す」でバックアップを取り、古いテストを削除してください。');
@@ -72,6 +73,7 @@ function restoreSaved() {
       }));
   }
   if (Array.isArray(saved.sets)) state.sets = saved.sets;
+  if (Array.isArray(saved.folders)) state.folders = saved.folders.filter((f) => typeof f === 'string' && f);
   if (typeof saved.currentSet === 'string') state.currentSet = saved.currentSet;
   if (saved.settings) {
     if (LEVELS[saved.settings.level]) state.settings.level = saved.settings.level;
@@ -101,30 +103,41 @@ function showMessage(text, kind = 'error') {
 }
 
 /**
- * 確認の窓(OK / キャンセル)。input に文字を渡すと、名前の入力欄も出す。
+ * 確認の窓(OK / キャンセル)。input に文字を渡すと、名前の入力欄も出す。choices を渡すと、選ぶ欄を出す。
  * ブラウザの confirm / prompt は、iPad の Safari で「このページのダイアログを表示しない」を選ぶと、
  * 何も聞かずにキャンセルになる(成績のリセットなどが動かなくなる)ので使わない。
- * @returns {Promise<boolean | string | null>} 確認: true / false。入力: 入力した文字 / null(キャンセル)
+ * @param {{value: string, label: string}[] | null} choices 選ぶ欄の項目(input は、初めに選んでおく値)
+ * @returns {Promise<boolean | string | null>} 確認: true / false。入力・選ぶ: 入力した文字・選んだ値 / null(キャンセル)
  */
-function ask(text, input = null) {
+function ask(text, input = null, choices = null) {
   const dlg = $('ask');
-  const field = $('ask-input');
+  const select = $('ask-select');
+  const field = choices ? select : $('ask-input');
   $('ask-text').textContent = text;
-  field.hidden = input === null;
+  $('ask-input').hidden = input === null || !!choices;
+  select.hidden = !choices;
+  select.textContent = '';
+  for (const c of choices || []) {
+    const o = document.createElement('option');
+    o.value = c.value;
+    o.textContent = c.label;
+    select.appendChild(o);
+  }
   field.value = input ?? '';
   return new Promise((resolve) => {
     const done = (ok) => {
       dlg.removeEventListener('close', onClose);
       $('ask-cancel').onclick = null;
       if (dlg.open) dlg.close();
-      resolve(input === null ? ok : ok ? field.value : null);
+      resolve(input === null && !choices ? ok : ok ? field.value : null);
     };
     const onClose = () => done(dlg.returnValue === 'ok');
     dlg.returnValue = '';
     dlg.addEventListener('close', onClose);
     $('ask-cancel').onclick = () => done(false);
     dlg.showModal();
-    if (input !== null) {
+    if (choices) select.focus();
+    else if (input !== null) {
       field.focus();
       field.select();
     } else $('ask-ok').focus();
@@ -800,10 +813,8 @@ function groupHead(g, set) {
   cb.indeterminate = !cb.checked && g.words.some((w) => w.enabled);
   cb.setAttribute('aria-label', `${label}の語をまとめて出題する`);
   cb.addEventListener('change', () => {
-    for (const w of g.words) {
-      w.enabled = cb.checked;
-      w.updatedAt = Date.now();
-    }
+    setEnabled(g.words, cb.checked);
+    syncDrill([set.id]);
     persist();
     renderWordList();
   });
@@ -929,7 +940,9 @@ function wordRow(w) {
     w.enabled = cb.checked;
     w.updatedAt = Date.now();
     li.className = rowClass(w);
+    syncDrill([w.setId]);
     persist();
+    renderSets();
     updateCount();
   });
   on.appendChild(cb);
@@ -1075,6 +1088,38 @@ function questionText(w) {
   return w.reading;
 }
 
+/** テストに、出題するチェックを入れる・外す */
+function setDrill(setId, on) {
+  const next = new Set(drillSetIds());
+  if (on) next.add(setId);
+  else next.delete(setId);
+  state.settings.drillSets = state.sets.map((s) => s.id).filter((id) => next.has(id));
+}
+
+/** 語の「出題する」のチェックを、まとめて入れる・外す */
+function setEnabled(words, on) {
+  for (const w of words) {
+    w.enabled = on;
+    w.updatedAt = Date.now();
+  }
+}
+
+/**
+ * テストのチェックを入れる・外す。入れると、その中の写真(語)にすべてチェックが入る。外すと、すべて外れる。
+ */
+function checkSet(setId, on) {
+  setEnabled(wordsOf(state.words, setId), on);
+  setDrill(setId, on);
+}
+
+/**
+ * 写真・語のチェックを変えたあとに、テストのチェックを合わせる。
+ * チェックの入った語が 1 つでもあればテストにもチェックを入れ、すべて外れたらテストのチェックも外す。
+ */
+function syncDrill(setIds) {
+  for (const id of setIds) setDrill(id, state.words.some((w) => w.setId === id && w.enabled));
+}
+
 /** 出題するテスト(ツリーでチェックを入れたテスト)。まだ選んでいなければ、選んでいるテスト */
 function drillSetIds() {
   const stored = state.settings.drillSets;
@@ -1153,10 +1198,7 @@ function renderSets() {
     check.checked = drill.has(set.id);
     check.setAttribute('aria-label', `「${set.name}」から出題する`);
     check.addEventListener('change', () => {
-      const next = new Set(drillSetIds());
-      if (check.checked) next.add(set.id);
-      else next.delete(set.id);
-      state.settings.drillSets = state.sets.map((s) => s.id).filter((id) => next.has(id));
+      checkSet(set.id, check.checked); // 中の写真にも、すべてチェックを入れる・外す
       persist();
       renderWordList();
     });
@@ -1185,12 +1227,9 @@ function renderSets() {
         cb.type = 'checkbox';
         cb.checked = g.words.every((w) => w.enabled);
         cb.indeterminate = !cb.checked && g.words.some((w) => w.enabled);
-        cb.disabled = !drill.has(set.id);
         cb.addEventListener('change', () => {
-          for (const w of g.words) {
-            w.enabled = cb.checked;
-            w.updatedAt = Date.now();
-          }
+          setEnabled(g.words, cb.checked);
+          syncDrill([set.id]); // 写真のチェックが全部外れたら、テストのチェックも外す
           persist();
           renderWordList();
         });
@@ -1214,8 +1253,7 @@ function renderSets() {
     }
     parent.appendChild(li);
   }
-  const n = setWords().length, photos = photoCount(state.words, state.currentSet);
-  $('set-info').textContent = `「${currentSetName()}」: ${n} 語(写真 ${photos} 枚)`;
+  for (const name of state.folders) if (!folders.has(name)) folderNode(name, tree, drill, open);
   $('set-name-inline').textContent = listSets().map((s) => `「${s.name}」`).join('');
   $('btn-set-delete').disabled = false;
   renderStorage();
@@ -1261,13 +1299,10 @@ function folderNode(name, tree, drill, open) {
   check.checked = on === sets.length;
   check.indeterminate = on > 0 && on < sets.length;
   check.setAttribute('aria-label', `フォルダー「${name}」のテストから出題する`);
+  check.disabled = !sets.length; // テストの入っていないフォルダー
+  if (!sets.length) check.checked = false;
   check.addEventListener('change', () => {
-    const next = new Set(drillSetIds());
-    for (const s of sets) {
-      if (check.checked) next.add(s.id);
-      else next.delete(s.id);
-    }
-    state.settings.drillSets = state.sets.map((s) => s.id).filter((id) => next.has(id));
+    for (const s of sets) checkSet(s.id, check.checked); // 中のテスト(とその写真)に、すべてチェックを入れる・外す
     persist();
     renderWordList();
   });
@@ -1292,28 +1327,45 @@ function folderNode(name, tree, drill, open) {
 
 const FOLDER_NAME_MAX = 20;
 
-/** 今あるフォルダーの名前(出てくる順) */
+/** 今あるフォルダーの名前(作った順。テストの入っていないフォルダーも) */
 function folderNames() {
-  return [...new Set(state.sets.map((s) => s.folder).filter(Boolean))];
+  return [...new Set([...state.folders, ...state.sets.map((s) => s.folder).filter(Boolean)])];
 }
 
-/** 選んでいるテストを、フォルダーに入れる(新しい名前なら、フォルダーを作る。空にすると、フォルダーから出す) */
-async function onSetFolder() {
-  const set = state.sets.find((s) => s.id === state.currentSet);
-  if (!set) return;
-  const names = folderNames();
-  const input = await ask(
-    `「${set.name}」を入れるフォルダーの名前(${FOLDER_NAME_MAX} 文字まで)。` +
-      (names.length ? `今あるフォルダー: ${names.map((n) => `「${n}」`).join('')}。` : '') +
-      '新しい名前なら、フォルダーを作ります。空にすると、フォルダーから出します。',
-    set.folder || names[0] || '',
-  );
+/** フォルダーを作る(テストは、あとで「フォルダーに入れる」で入れる) */
+async function onFolderNew() {
+  const input = await ask(`新しいフォルダーの名前(${FOLDER_NAME_MAX} 文字まで。例: 2学期中間確認テスト)`, '');
   if (input === null) return;
   const name = input.trim();
+  if (!name) return;
   if ([...name].length > FOLDER_NAME_MAX) {
     showMessage(`フォルダーの名前は ${FOLDER_NAME_MAX} 文字までです。`);
     return;
   }
+  if (folderNames().includes(name)) {
+    showMessage(`「${name}」というフォルダーは、もうあります。`);
+    return;
+  }
+  hideMessage();
+  state.folders = [...state.folders, name];
+  state.settings.treeOpen = [...new Set([...(state.settings.treeOpen || [state.currentSet]), folderKey(name)])];
+  persist();
+  renderWordList();
+}
+
+/** 選んでいるテストを、フォルダーに入れる(作ってあるフォルダーから選ぶ。「フォルダーから出す」も選べる) */
+async function onSetFolder() {
+  const set = state.sets.find((s) => s.id === state.currentSet);
+  if (!set) return;
+  const names = folderNames();
+  if (!names.length) {
+    showMessage('先に「フォルダーを作る」で、フォルダーを作ってください。');
+    return;
+  }
+  const choices = names.map((n) => ({ value: n, label: `📁 ${n}` }));
+  if (set.folder) choices.push({ value: '', label: '(フォルダーから出す)' });
+  const name = await ask(`「${set.name}」を入れるフォルダーを選んでください`, set.folder || names[0], choices);
+  if (name === null) return;
   hideMessage();
   if (name) set.folder = name;
   else delete set.folder;
@@ -1339,6 +1391,7 @@ async function renameFolder(old) {
     else delete s.folder;
     s.updatedAt = Date.now();
   }
+  state.folders = [...new Set(state.folders.map((f) => (f === old ? name : f)).filter(Boolean))];
   if (state.settings.treeOpen) {
     state.settings.treeOpen = state.settings.treeOpen.map((k) => (k === folderKey(old) && name ? folderKey(name) : k)).filter((k) => k !== folderKey(old));
   }
@@ -1383,13 +1436,34 @@ async function onSetRename() {
   renderWordList();
 }
 
+/** チェックを入れたテスト(チェックを入れたフォルダーは、中のテストごと)を削除する */
 async function onSetDelete() {
-  const n = setWords().length;
-  if (!(await ask(`「${currentSetName()}」と、その中の ${n} 語(成績も)を削除しますか? 元に戻せません。`))) return;
-  const r = deleteSet(state.sets, state.words, state.currentSet);
-  state.sets = r.sets;
-  state.words = r.words;
-  state.currentSet = r.currentSet;
+  const drill = new Set(drillSetIds());
+  const targets = state.sets.filter((s) => drill.has(s.id));
+  if (!targets.length) {
+    showMessage('削除するテスト(またはフォルダー)にチェックを入れてください。');
+    return;
+  }
+  const folders = folderNames().filter((f) => {
+    const inside = state.sets.filter((s) => s.folder === f);
+    return inside.length && inside.every((s) => drill.has(s.id));
+  });
+  const ids = new Set(targets.map((s) => s.id));
+  const nWords = state.words.filter((w) => ids.has(w.setId)).length;
+  const lines = [
+    ...folders.map((f) => `📁「${f}」(中のテスト ${state.sets.filter((s) => s.folder === f).length} 件ごと)`),
+    ...targets.filter((s) => !folders.includes(s.folder)).map((s) => `「${s.name}」`),
+  ];
+  const ok = await ask(`チェックを入れた ${lines.join('、')} を削除しますか? テスト ${targets.length} 件・${nWords} 語(成績も)が消えます。元に戻せません。`);
+  if (!ok) return;
+  hideMessage();
+  let sets = state.sets, words = state.words, currentSet = state.currentSet;
+  for (const s of targets) ({ sets, words, currentSet } = deleteSet(sets, words, s.id));
+  state.sets = sets;
+  state.words = words;
+  state.currentSet = state.sets.some((s) => s.id === state.currentSet) ? state.currentSet : currentSet;
+  state.folders = state.folders.filter((f) => !folders.includes(f));
+  state.settings.drillSets = [state.currentSet];
   printItems = [];
   renderPrintItems();
   persist();
@@ -2013,7 +2087,7 @@ function renderStorage() {
 async function onExport() {
   hideMessage();
   const name = backupFileName();
-  const file = new File([JSON.stringify(makeBackup(state.sets, state.words))], name, { type: 'application/json' });
+  const file = new File([JSON.stringify(makeBackup(state.sets, state.words, new Date(), state.folders))], name, { type: 'application/json' });
   const summary = `テスト ${state.sets.length} 件・${state.words.length} 語`;
   try {
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -2060,14 +2134,14 @@ async function importBackupText(text, mode, from) {
           `${from}の内容(テスト ${inc.sets.length} 件・${inc.words.length} 語)に置き換えますか? 元に戻せません。`,
       );
       if (!ok) return;
-      applyData(inc.sets, inc.words);
+      applyData(inc.sets, inc.words, inc.folders);
       message = `置き換えました(テスト ${inc.sets.length} 件・${inc.words.length} 語)。`;
     } else {
       // はじめて使う端末の、空の「テスト 1」だけなら、ファイルのテストに入れ替える
       const fresh = state.sets.length === 1 && state.words.length === 0;
-      const base = fresh ? { sets: [], words: [] } : { sets: state.sets, words: state.words };
+      const base = fresh ? { sets: [], words: [], folders: [] } : { sets: state.sets, words: state.words, folders: state.folders };
       const r = mergeBackup(base, inc);
-      applyData(r.sets, r.words);
+      applyData(r.sets, r.words, r.folders);
       message = `合わせました: テスト ${r.addedSets} 件と語 ${r.addedWords} 語を追加し、${r.updatedWords} 語を新しい方の成績に更新しました。`;
     }
     persist();
@@ -2093,7 +2167,7 @@ async function onQrShow() {
   let svgs;
   try {
     const { default: qrcode } = await import('./vendor/qrcode/qrcode.mjs');
-    const chunks = splitPayload(await packBackup(makeBackup(sets, words)));
+    const chunks = splitPayload(await packBackup(makeBackup(sets, words, new Date(), scope === 'current' ? [] : state.folders)));
     svgs = chunks.map((text) => {
       const qr = qrcode(0, 'M');
       qr.addData(text, 'Byte');
@@ -2202,8 +2276,9 @@ async function onQrScan(mode) {
   tick();
 }
 
-function applyData(sets, words) {
+function applyData(sets, words, folders = []) {
   const m = migrate({ sets, words, currentSet: state.currentSet });
+  state.folders = folders;
   state.sets = m.sets;
   state.words = m.words;
   state.currentSet = m.currentSet;
@@ -2300,18 +2375,16 @@ function init() {
   });
   $('btn-extract').addEventListener('click', onExtract);
   $('btn-all').addEventListener('click', () => {
-    for (const w of listWords()) {
-      w.enabled = true;
-      w.updatedAt = Date.now();
-    }
+    const ids = listSets().map((s) => s.id);
+    setEnabled(listWords(), true);
+    syncDrill(ids);
     persist();
     renderWordList();
   });
   $('btn-none').addEventListener('click', () => {
-    for (const w of listWords()) {
-      w.enabled = false;
-      w.updatedAt = Date.now();
-    }
+    const ids = listSets().map((s) => s.id);
+    setEnabled(listWords(), false);
+    syncDrill(ids);
     persist();
     renderWordList();
   });
@@ -2326,6 +2399,7 @@ function init() {
   $('btn-set-rename').addEventListener('click', onSetRename);
   $('btn-set-delete').addEventListener('click', onSetDelete);
   $('btn-set-folder').addEventListener('click', onSetFolder);
+  $('btn-folder-new').addEventListener('click', onFolderNew);
   $('btn-export').addEventListener('click', onExport);
   // データの渡し方: ファイル / QR コード
   for (const r of document.querySelectorAll('input[name="sync-mode"]')) {

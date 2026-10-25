@@ -7,9 +7,12 @@ export const BACKUP_VERSION = 1;
 // localStorage の上限(Safari は 1 サイトあたり約 5MB)。これに近づいたら知らせる
 export const STORAGE_LIMIT = 5 * 1024 * 1024;
 
-/** 書き出すデータ(写真は含まない。判定の厳しさや画面の表示などの端末ごとの設定も含まない) */
-export function makeBackup(sets, words, now = new Date()) {
-  return { app: BACKUP_APP, version: BACKUP_VERSION, exportedAt: now.toISOString(), sets, words };
+/**
+ * 書き出すデータ(写真は含まない。判定の厳しさや画面の表示などの端末ごとの設定も含まない)。
+ * folders: フォルダーの名前(テストの入っていない、作っただけのフォルダーも残すため)
+ */
+export function makeBackup(sets, words, now = new Date(), folders = []) {
+  return { app: BACKUP_APP, version: BACKUP_VERSION, exportedAt: now.toISOString(), sets, words, ...(folders.length ? { folders } : {}) };
 }
 
 /** ファイル名(例: kanji-drill-20261012-1530.json) */
@@ -37,7 +40,8 @@ export function parseBackup(text) {
   const sets = data.sets.filter((s) => s && typeof s.id === 'string' && typeof s.name === 'string');
   const ids = new Set(sets.map((s) => s.id));
   const words = data.words.filter((w) => w && typeof w.id === 'string' && typeof w.word === 'string' && ids.has(w.setId));
-  return { sets, words, exportedAt: data.exportedAt || '' };
+  const folders = Array.isArray(data.folders) ? data.folders.filter((f) => typeof f === 'string' && f) : [];
+  return { sets, words, folders, exportedAt: data.exportedAt || '' };
 }
 
 /**
@@ -77,7 +81,8 @@ export function mergeBackup(cur, inc) {
       updatedWords++;
     }
   }
-  return { sets, words, addedSets, addedWords, updatedWords };
+  const folders = [...new Set([...(cur.folders || []), ...(inc.folders || [])])]; // フォルダーは、両方の端末のものをまとめる
+  return { sets, words, folders, addedSets, addedWords, updatedWords };
 }
 
 /** 保存しているデータの大きさ(バイト、UTF-8) */

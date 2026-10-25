@@ -129,8 +129,17 @@ for (const name of DEVICES) {
     await page.locator('#ask-cancel').tap();
     await expect(kakiRow).toHaveCount(1);
     // テストをフォルダーに入れる → フォルダーのチェックで、中のテストをまとめて出題する・しない
+    // フォルダーがないうちは、入れられない
     await page.locator('#btn-set-folder').tap();
+    await expect(page.locator('#message')).toContainText('先に「フォルダーを作る」で');
+    await page.locator('#btn-folder-new').tap();
     await confirmAsk(page, '2学期');
+    await expect(page.locator('#set-tree .tree-folder[data-folder="2学期"] .tree-count')).toHaveText('(テスト 0 件・0 語)');
+    await page.locator('#btn-set-folder').tap();
+    await expect(page.locator('#ask-select')).toBeVisible();
+    await page.locator('#ask-select').selectOption('2学期');
+    await page.locator('#ask-ok').tap();
+    await expect(page.locator('#ask')).toBeHidden();
     const folder = page.locator('#set-tree .tree-folder[data-folder="2学期"]');
     await expect(folder.locator('.tree-folder-name')).toHaveText('📁 2学期');
     await expect(folder.locator('.tree-count').first()).toHaveText('(テスト 1 件・3 語)');
