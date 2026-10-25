@@ -15,7 +15,9 @@
   "dependencies": {
     "@tesseract.js-data/jpn": "1.0.0",
     "@tesseract.js-data/jpn_vert": "1.0.0",
+    "jsqr": "1.4.0",
     "kuromoji": "0.1.2",
+    "qrcode-generator": "2.0.4",
     "tesseract.js": "5.1.1",
     "tesseract.js-core": "5.1.1"
   },

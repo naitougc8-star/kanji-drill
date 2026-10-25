@@ -6,6 +6,8 @@
 // vendor/tesseract/tesseract.min.js, worker.min.js
 // vendor/tesseract/core/tesseract-core-simd-lstm.wasm.js, tesseract-core-lstm.wasm.js
 // vendor/tesseract/lang/jpn.traineddata.gz, jpn_vert.traineddata.gz (4.0.0_best_int)
+// vendor/qrcode/qrcode.mjs           … QR コードを作る(qrcode-generator、MIT。ライセンスはファイルの先頭)
+// vendor/jsqr/jsQR.js                … QR コードを読む(jsQR、Apache-2.0)
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -66,3 +68,8 @@ for (const lang of ['jpn', 'jpn_vert']) {
     path.join(V, `tesseract/lang/${lang}.traineddata.gz`),
   );
 }
+
+// ---- QR コード(ほかの端末とのデータのやりとり) ----
+copy(path.join(NM, 'qrcode-generator/dist/qrcode.mjs'), path.join(V, 'qrcode/qrcode.mjs'));
+copy(path.join(NM, 'jsqr/dist/jsQR.js'), path.join(V, 'jsqr/jsQR.js'));
+copy(path.join(NM, 'jsqr/LICENSE'), path.join(V, 'jsqr/LICENSE'));

@@ -181,13 +181,39 @@
         <summary><h2>4. バックアップ・ほかの端末と共有</h2></summary>
         <p class="hint">
           語と成績は、この端末のブラウザの中だけに保存されています(写真は保存しません)。
-          「書き出す」でファイルにしておくと、データが消えたときに戻せます。iPad と iPhone で同じテストを使うときは、
-          片方で書き出したファイルを <strong>AirDrop</strong> で送るか <strong>「ファイル」アプリの iCloud Drive</strong> に保存し、もう片方で「読み込んで合わせる」を押してください。
+          ほかの端末(iPad と iPhone など)で同じテストを使うときは、<strong>ファイル</strong>か <strong>QR コード</strong>でデータを渡します。
         </p>
-        <div class="row">
-          <button type="button" id="btn-export" class="btn primary">書き出す(すべてのテスト)</button>
-          <label class="btn file-btn">読み込んで合わせる<input type="file" id="import-merge" accept=".json,application/json"></label>
-          <label class="btn file-btn">読み込んで置き換える<input type="file" id="import-replace" accept=".json,application/json"></label>
+        <div class="seg seg-sync" role="radiogroup" aria-label="データの渡し方">
+          <label><input type="radio" name="sync-mode" value="file" checked><span>ファイル</span></label>
+          <label><input type="radio" name="sync-mode" value="qr"><span>QR コード</span></label>
+        </div>
+        <div id="sync-file">
+          <p class="hint">
+            「書き出す」でファイルにしておくと、データが消えたときにも戻せます。片方で書き出したファイルを <strong>AirDrop</strong> で送るか
+            <strong>「ファイル」アプリの iCloud Drive</strong> に保存し、もう片方で「読み込んで合わせる」を押してください。
+          </p>
+          <div class="row">
+            <button type="button" id="btn-export" class="btn primary">書き出す(すべてのテスト)</button>
+            <label class="btn file-btn">読み込んで合わせる<input type="file" id="import-merge" accept=".json,application/json"></label>
+            <label class="btn file-btn">読み込んで置き換える<input type="file" id="import-replace" accept=".json,application/json"></label>
+          </div>
+        </div>
+        <div id="sync-qr" hidden>
+          <p class="hint">
+            <strong>送る端末</strong>で「QR コードを出す」を押し、<strong>受け取る端末</strong>で「QR コードを読んで合わせる」を押して、カメラを送る端末の画面に向けてください。
+            データが多いときは QR コードが何枚かになり、自動で切り替わります。全部読めるまで、カメラを向けたままにしてください。
+          </p>
+          <div class="row">
+            <select id="qr-scope" aria-label="送るテスト">
+              <option value="all">すべてのテスト</option>
+              <option value="current">選んでいるテストだけ</option>
+            </select>
+            <button type="button" id="btn-qr-show" class="btn primary">QR コードを出す(送る)</button>
+          </div>
+          <div class="row">
+            <button type="button" id="btn-qr-merge" class="btn">QR コードを読んで合わせる</button>
+            <button type="button" id="btn-qr-replace" class="btn">QR コードを読んで置き換える</button>
+          </div>
         </div>
         <p class="hint">
           「合わせる」: 両方の端末のテストと語をまとめます。同じ語は、新しく出題・変更した方の成績を残します(片方で削除した語は残ります)。<br>
@@ -272,6 +298,30 @@
     </form>
   </dialog>
 
+  <!-- QR コードを出す(送る) -->
+  <dialog id="qr-show" class="qr-dlg" aria-labelledby="qr-show-title">
+    <p id="qr-show-title" class="qr-title"></p>
+    <div id="qr-img" class="qr-img" role="img" aria-label="データの QR コード"></div>
+    <p id="qr-page" class="qr-page"></p>
+    <div class="row qr-buttons">
+      <button type="button" id="qr-prev" class="btn">前</button>
+      <button type="button" id="qr-pause" class="btn">止める</button>
+      <button type="button" id="qr-next" class="btn">次</button>
+      <button type="button" id="qr-close" class="btn primary">閉じる</button>
+    </div>
+  </dialog>
+
+  <!-- QR コードを読む(受け取る) -->
+  <dialog id="qr-scan" class="qr-dlg" aria-labelledby="qr-scan-title">
+    <p id="qr-scan-title" class="qr-title">送る端末の QR コードに、カメラを向けてください</p>
+    <video id="qr-video" class="qr-video" playsinline muted></video>
+    <p id="qr-progress" class="qr-page" aria-live="polite"></p>
+    <div id="qr-dots" class="qr-dots"></div>
+    <div class="row qr-buttons">
+      <button type="button" id="qr-scan-close" class="btn">やめる</button>
+    </div>
+  </dialog>
+
   <!-- 百人一首の解説(全日本かるた協会「一日一首」のページを表示する) -->
   <dialog id="sanko" class="sanko" aria-labelledby="sanko-title">
     <div class="sanko-head">
@@ -292,6 +342,10 @@
     <p>
       文字認識: <a href="https://github.com/naptha/tesseract.js" target="_blank" rel="noopener">Tesseract.js</a>(Apache-2.0)/
       形態素解析: <a href="https://github.com/takuyaa/kuromoji.js" target="_blank" rel="noopener">kuromoji.js</a>(Apache-2.0、辞書は mecab-ipadic)
+    </p>
+    <p>
+      QR コード: <a href="https://github.com/kazuhikoarase/qrcode-generator" target="_blank" rel="noopener">qrcode-generator</a>(MIT)/
+      <a href="https://github.com/cozmo/jsQR" target="_blank" rel="noopener">jsQR</a>(Apache-2.0)。QR コードは(株)デンソーウェーブの登録商標です。
     </p>
   </footer>
 </body>

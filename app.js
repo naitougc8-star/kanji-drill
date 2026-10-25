@@ -3,7 +3,7 @@
 import { judge, LEVELS, DEFAULT_LEVEL } from './judge.js';
 import { getStrokes } from './strokes.js';
 import { Pad, drawModel } from './pad.js';
-import { extractWords, segments, hasKanji, newId, loadTokenizer, kataToHira } from './words.js';
+import { extractWords, segments, hasKanji, newId, loadTokenizer, kataToHira, loadScript } from './words.js';
 import { loadImage, preprocess, recognize, recognizeCrops } from './ocr.js';
 import { Marker } from './marker.js';
 import { extractTableColumns, fixKatakana, katakanaRuns } from './table.js';
@@ -13,6 +13,7 @@ import { migrate, wordsOf, photoCount, addWords, groupsOf, createSet, deleteSet 
 import { makeBackup, backupFileName, parseBackup, mergeBackup, dataSize, formatSize, STORAGE_LIMIT } from './backup.js';
 import { KIND_LABEL, kindOf, detectKind, isHeaderText, yomiWord, yomiParts } from './kinds.js';
 import { matchPoems, poemByNo, poemParts, checkKana, normalizeKana } from './hyakunin.js';
+import { packBackup, unpackBackup, splitPayload, QrAssembler } from './qrsync.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -844,6 +845,32 @@ function resetResults(words) {
   renderWordList();
 }
 
+/**
+ * 問題の文を直す。文の中に語(書き取りは答えの漢字、読みは問題の漢字)を入れてもらい、その前と後を問題の文にする。
+ * 空にすると、文なしにする。
+ */
+async function editSentence(w) {
+  const input = await ask(`問題の文(文の中に「${w.word}」を入れてください。空にすると文なしになります)`, `${w.before}${w.word}${w.after}`);
+  if (input === null) return;
+  const text = input.trim();
+  let before = '', after = '';
+  if (text) {
+    const at = text.indexOf(w.word);
+    if (at < 0) {
+      showMessage(`文の中に「${w.word}」が入っていません。語を入れて、もう一度直してください。`);
+      return;
+    }
+    before = text.slice(0, at);
+    after = text.slice(at + w.word.length);
+  }
+  hideMessage();
+  w.before = before;
+  w.after = after;
+  w.updatedAt = Date.now();
+  persist();
+  renderWordList();
+}
+
 function rowClass(w) {
   return [w.enabled ? '' : 'off', `res-${statusOf(w)}`].join(' ').trim();
 }
@@ -921,6 +948,16 @@ function wordRow(w) {
     c.className = 'ctx';
     c.innerHTML = ctx;
     meta.appendChild(c);
+  }
+  // 問題の文(前後の文)を直す・足す(百人一首は初句を出すので、文はない)
+  if (kindOf(w) !== 'hyakunin') {
+    const edit = document.createElement('button');
+    edit.type = 'button';
+    edit.className = 'btn small ctx-edit';
+    edit.textContent = w.before || w.after ? '文を直す' : '文を足す';
+    edit.setAttribute('aria-label', `「${w.word}」の問題の文を直す`);
+    edit.addEventListener('click', () => editSentence(w));
+    meta.appendChild(edit);
   }
   li.appendChild(meta);
   const why = unplayableReason(w);
@@ -1258,7 +1295,16 @@ async function renderQuestion() {
   const ctx = $('context');
   ctx.textContent = '';
   if (kind === 'yomi') {
-    ctx.textContent = '読みを、ひらがなで書きましょう';
+    // 文があれば、文の中の語に印を付けて出す
+    if (w.before || w.after) {
+      const m = document.createElement('mark');
+      m.textContent = w.word;
+      const line = document.createElement('div');
+      line.className = 'yomi-sentence';
+      line.append(w.before, m, w.after);
+      ctx.append(line);
+    }
+    ctx.append('読みを、ひらがなで書きましょう');
   } else if (kind === 'hyakunin') {
     ctx.textContent = '百人一首: 続きを、下の入力欄に「ひらがな」で入力しましょう';
   } else if (w.before || w.after) {
@@ -1714,13 +1760,18 @@ async function onImport(e, mode) {
   input.value = ''; // 同じファイルをもう一度選べるように
   if (!file) return;
   hideMessage();
+  await importBackupText(await file.text(), mode, 'ファイル');
+}
+
+/** バックアップ(JSON の文字)を読み込む。from: どこから(確認の文に使う) */
+async function importBackupText(text, mode, from) {
   try {
-    const inc = parseBackup(await file.text());
+    const inc = parseBackup(text);
     let message;
     if (mode === 'replace') {
       const ok = await ask(
         `この端末のテストと語(テスト ${state.sets.length} 件・${state.words.length} 語)を、` +
-          `ファイルの内容(テスト ${inc.sets.length} 件・${inc.words.length} 語)に置き換えますか? 元に戻せません。`,
+          `${from}の内容(テスト ${inc.sets.length} 件・${inc.words.length} 語)に置き換えますか? 元に戻せません。`,
       );
       if (!ok) return;
       applyData(inc.sets, inc.words);
@@ -1740,6 +1791,129 @@ async function onImport(e, mode) {
     setBackupStatus('');
     showMessage(`読み込めませんでした(${err.message || err})。`);
   }
+}
+
+// ---------- QR コードでデータを渡す ----------
+
+let qrTimer = null;
+
+/** 送るデータを、QR コードにして 1 枚ずつ出す(何枚かあるときは自動で切り替える) */
+async function onQrShow() {
+  hideMessage();
+  const scope = $('qr-scope').value;
+  const sets = scope === 'current' ? state.sets.filter((s) => s.id === state.currentSet) : state.sets;
+  const ids = new Set(sets.map((s) => s.id));
+  const words = state.words.filter((w) => ids.has(w.setId));
+  let svgs;
+  try {
+    const { default: qrcode } = await import('./vendor/qrcode/qrcode.mjs');
+    const chunks = splitPayload(await packBackup(makeBackup(sets, words)));
+    svgs = chunks.map((text) => {
+      const qr = qrcode(0, 'M');
+      qr.addData(text, 'Byte');
+      qr.make();
+      return qr.createSvgTag({ cellSize: 4, margin: 4, scalable: true });
+    });
+  } catch (err) {
+    showMessage(`QR コードを作れませんでした(${err.message || err})。ファイルで渡してください。`);
+    return;
+  }
+  let page = 0, playing = svgs.length > 1;
+  const draw = () => {
+    $('qr-img').innerHTML = svgs[page]; // QR コードの絵(qrcode-generator が作った SVG)
+    $('qr-page').textContent = svgs.length > 1 ? `${page + 1} / ${svgs.length} 枚(${playing ? '自動で切り替え中' : '止めています'})` : '1 枚';
+  };
+  const step = (d) => {
+    page = (page + d + svgs.length) % svgs.length;
+    draw();
+  };
+  const play = (on) => {
+    playing = on && svgs.length > 1;
+    clearInterval(qrTimer);
+    if (playing) qrTimer = setInterval(() => step(1), 1500);
+    $('qr-pause').textContent = playing ? '止める' : '動かす';
+    draw();
+  };
+  $('qr-show-title').textContent = `${scope === 'current' ? `「${currentSetName()}」` : 'すべてのテスト'}(テスト ${sets.length} 件・${words.length} 語)の QR コード`;
+  for (const id of ['qr-prev', 'qr-next', 'qr-pause']) $(id).hidden = svgs.length < 2;
+  $('qr-prev').onclick = () => (play(false), step(-1));
+  $('qr-next').onclick = () => (play(false), step(1));
+  $('qr-pause').onclick = () => play(!playing);
+  $('qr-close').onclick = () => $('qr-show').close();
+  $('qr-show').onclose = () => clearInterval(qrTimer);
+  $('qr-show').showModal();
+  play(playing);
+}
+
+let qrStream = null;
+
+/** カメラで QR コードを読んで、データを受け取る。mode: 'merge'(合わせる)| 'replace'(置き換える) */
+async function onQrScan(mode) {
+  hideMessage();
+  const dlg = $('qr-scan');
+  const video = $('qr-video');
+  const asm = new QrAssembler();
+  let finished = false;
+  const stop = () => {
+    finished = true;
+    if (qrStream) for (const t of qrStream.getTracks()) t.stop();
+    qrStream = null;
+    video.srcObject = null;
+    if (dlg.open) dlg.close();
+  };
+  const progress = () => {
+    $('qr-progress').textContent = asm.total ? `${asm.have} / ${asm.total} 枚 読みました` : 'まだ読めていません';
+    const dots = $('qr-dots');
+    dots.textContent = '';
+    for (let i = 1; i <= asm.total; i++) {
+      const d = document.createElement('span');
+      d.className = 'qr-dot' + (asm.parts.has(i) ? ' on' : '');
+      dots.appendChild(d);
+    }
+  };
+  if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
+    showMessage('この端末・ブラウザでは、カメラが使えませんでした。ファイルで渡してください(カメラは https のページでだけ使えます)。');
+    return;
+  }
+  try {
+    await loadScript('vendor/jsqr/jsQR.js');
+    qrStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+  } catch (err) {
+    showMessage(`カメラが使えませんでした(${err.message || err})。ブラウザの設定で、このページのカメラの使用を許可してください。ファイルで渡すこともできます。`);
+    return;
+  }
+  $('qr-scan-close').onclick = stop;
+  dlg.onclose = () => !finished && stop();
+  progress();
+  dlg.showModal();
+  video.srcObject = qrStream;
+  await video.play().catch(() => {});
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const tick = async () => {
+    if (finished) return;
+    if (video.videoWidth) {
+      const k = Math.min(1, 800 / Math.max(video.videoWidth, video.videoHeight));
+      canvas.width = Math.round(video.videoWidth * k);
+      canvas.height = Math.round(video.videoHeight * k);
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const code = globalThis.jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' });
+      if (code && asm.add(code.data).ok) progress();
+      if (asm.done) {
+        const payload = asm.payload;
+        stop();
+        try {
+          await importBackupText(await unpackBackup(payload), mode, 'QR コード');
+        } catch (err) {
+          showMessage(`QR コードのデータを読み込めませんでした(${err.message || err})。`);
+        }
+        return;
+      }
+    }
+    setTimeout(tick, 150);
+  };
+  tick();
 }
 
 function applyData(sets, words) {
@@ -1867,6 +2041,17 @@ function init() {
   $('btn-set-rename').addEventListener('click', onSetRename);
   $('btn-set-delete').addEventListener('click', onSetDelete);
   $('btn-export').addEventListener('click', onExport);
+  // データの渡し方: ファイル / QR コード
+  for (const r of document.querySelectorAll('input[name="sync-mode"]')) {
+    r.addEventListener('change', () => {
+      if (!r.checked) return;
+      $('sync-file').hidden = r.value !== 'file';
+      $('sync-qr').hidden = r.value !== 'qr';
+    });
+  }
+  $('btn-qr-show').addEventListener('click', onQrShow);
+  $('btn-qr-merge').addEventListener('click', () => onQrScan('merge'));
+  $('btn-qr-replace').addEventListener('click', () => onQrScan('replace'));
   $('import-merge').addEventListener('change', (e) => onImport(e, 'merge'));
   $('import-replace').addEventListener('change', (e) => onImport(e, 'replace'));
   $('btn-start').addEventListener('click', () => startSession('all'));

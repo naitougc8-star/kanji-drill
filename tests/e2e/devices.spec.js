@@ -109,6 +109,20 @@ for (const name of DEVICES) {
     await expect(page.locator('#fold-import')).not.toHaveAttribute('open', '');
     await page.locator('#fold-backup summary').tap();
     await expect(page.locator('#fold-backup')).not.toHaveAttribute('open', '');
+    // 問題の文を直す(文の中に語が入っていないと止める)
+    const kakiRow = page.locator('#word-list li[data-word="満員"]');
+    await kakiRow.locator('.ctx-edit').tap();
+    await confirmAsk(page, 'こんでいるバス');
+    await expect(page.locator('#message')).toContainText('「満員」が入っていません');
+    await kakiRow.locator('.ctx-edit').tap();
+    await confirmAsk(page, '朝の満員のバス');
+    await expect(kakiRow.locator('.ctx')).toHaveText('朝の満員のバス');
+    // 読みの問題にも文を足せる
+    const yomiRow = page.locator('#word-list li[data-word="苛まれる"]');
+    await expect(yomiRow.locator('.ctx-edit')).toHaveText('文を足す');
+    await yomiRow.locator('.ctx-edit').tap();
+    await confirmAsk(page, '不安に苛まれる');
+    await expect(yomiRow.locator('.ctx')).toHaveText('不安に苛まれる');
     // 写真のまとまりの名前を変える(12 文字まで)。数は「問」
     const g1 = page.locator('.group-head[data-group="1"]');
     await expect(g1.locator('.gcount')).toHaveText('2 問');

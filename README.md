@@ -7,6 +7,10 @@ iPad(Apple Pencil)で漢字を手書きし、**KanjiVG のお手本の筆画と 
   取り込んだ語は選んでいるテストに入り、出題もそのテストの中からだけ行います。テストの中では写真ごとにまとめて表示し、写真ごとに出題する・しないを切り替えられます。
 - **バックアップ・ほかの端末と共有**: すべてのテストをファイルに書き出し、読み込めます。iPad で書き出したファイルを AirDrop や iCloud Drive で iPhone に渡して「読み込んで合わせる」と、
   両方の端末のテストと語をまとめます(同じ語は、新しく出題・変更した方の成績を残します)。写真は保存しないので、データは 1 テスト(約 200 語)あたり約 50KB です。
+- **QR コードでデータを渡す**: 「4. バックアップ」で「QR コード」を選び、送る端末で「QR コードを出す」、受け取る端末で「QR コードを読んで合わせる」を押して、カメラを画面に向けます。
+  データ(初期値の項目を除いた JSON)を deflate で縮め、1 枚 450 文字ずつの QR コードに分けて、1.5 秒ごとに切り替えて出します(44 語で 6 枚ほど)。
+  受け取る側は、どの順番で読んでもよく、全部そろったら自動で読み込みます(qrsync.js、QR コードを作る: qrcode-generator、読む: jsQR)。
+- **問題の文を直す**: 語の一覧の「文を直す」で、問題の文(前後の文)を直したり、読みの問題に文を足したりできます(文の中にその語を入れる)。
 - **表のプリント(四角で囲む)**: 縦書き・番号付きの列・書き取る部分がカタカナの漢字テスト(例:「重大ジケン」「奥地をタンケンする」)を撮影し、
   表を四角く囲むと、罫線から 1 問ずつ自動で切り出して読み取り、カタカナの部分を書き取る部分として自動で選びます。
   問題が何段に並んだ表(1〜14・15〜28・29〜40 番など)でも、列の区切りが点線でも読めます。
@@ -44,6 +48,7 @@ marker.js    写真の上で表を囲む・問題をなぞる画面と、なぞ�
 table.js     表のプリントの読み取り(傾きの補正、罫線の検出、列ごとの切り出し、カタカナの読み違いの補正)
 sets.js      テスト(出題の範囲)と写真ごとのまとまり(DOM 非依存)
 backup.js    バックアップの書き出し・読み込み・合わせ込み(DOM 非依存)
+qrsync.js    QR コードでデータを渡す(縮める・分ける・集めて戻す。DOM 非依存)
 yomi.js      読み → 答えの漢字の候補(辞書を引き、kuromoji で文の自然さを比べて並べる)
 kinds.js     問題の種類(書き取り・読み・百人一首)の見分けと、読みの問題で書く部分(DOM 非依存)
 hyakunin.js  小倉百人一首 100 首(表記と歴史的仮名遣いのかな)と、初句から歌を探す関数(DOM 非依存)
@@ -377,6 +382,7 @@ gzip の先頭バイト(1f 8b)を見て、展開済みなら展開を飛ばし�
 - 読みの辞書(`data/yomi/`)は [mecab-ipadic](https://taku910.github.io/mecab/)(© 奈良先端科学技術大学院大学、ライセンスは `data/yomi/COPYING-ipadic.txt`)から作っています。常用漢字の一覧は [joyo-kanji](https://www.npmjs.com/package/joyo-kanji)(MIT)です。
 - [Tesseract.js](https://github.com/naptha/tesseract.js) と tesseract.js-core は Apache-2.0、言語データは [tessdata](https://github.com/tesseract-ocr/tessdata)(Apache-2.0)です。
 - [kuromoji.js](https://github.com/takuyaa/kuromoji.js) は Apache-2.0、辞書は mecab-ipadic です(`vendor/kuromoji/NOTICE.md`)。
+- QR コードを作る [qrcode-generator](https://github.com/kazuhikoarase/qrcode-generator)(© Kazuhiko Arase)は MIT、読む [jsQR](https://github.com/cozmo/jsQR) は Apache-2.0 です。QR コードは(株)デンソーウェーブの登録商標です。
 
 ## 実機(iPad の Safari)で確認してほしい項目
 
