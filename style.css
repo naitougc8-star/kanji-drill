@@ -431,10 +431,12 @@ details.fold > summary:focus-visible { outline: 2px solid var(--accent); outline
 .flash-ctx { font-size: 20px; }
 .flash-ctx mark { background: none; color: var(--accent); font-weight: 700; text-decoration: underline; text-underline-offset: 4px; }
 .flash-a { margin-top: 12px; }
-.flash-models { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px; }
-.flash-models canvas.model { border: 2px solid #8a7f72; border-radius: 4px; }
-.flash-char { font-weight: 700; }
-.flash-reading { font-size: clamp(36px, 10vw, 60px); margin: 0; }
+/* 答えの語: 1 行で、漢字は大きく、送りがなは半分の大きさ */
+.flash-word { margin: 0; white-space: nowrap; line-height: 1.15; font-weight: 500; letter-spacing: 0.02em; }
+.flash-word .okuri { font-size: 0.5em; }
+.flash-q { white-space: nowrap; }
+.flash-card.answered .flash-q { font-weight: 600; color: var(--text); }
+.flash-reading { font-size: clamp(36px, 10vw, 60px); margin: 0; white-space: nowrap; }
 .flash-reading b { color: var(--accent); }
 .flash-poem { font-size: clamp(20px, 5vw, 28px); font-weight: 700; margin: 0 0 6px; }
 .flash-poem-kana { font-size: clamp(18px, 4.5vw, 24px); color: var(--muted); margin: 0; }

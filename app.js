@@ -2046,6 +2046,12 @@ function startFlash(which = 'all') {
   renderFlash();
 }
 
+/** フラッシュ出題で、文字を 1 行に収める大きさ(px)。units: 文字の幅の合計(全角 1 字 = 1) */
+function flashFit(units, max) {
+  const width = Math.min(globalThis.innerWidth || 400, 900) - 48;
+  return Math.max(20, Math.min(max, Math.floor(width / Math.max(1, units) * 0.94)));
+}
+
 /** フラッシュ出題の 1 問(問題だけを出し、答えは隠す) */
 function renderFlash() {
   const w = wordById(flash.queue[flash.index]);
@@ -2077,13 +2083,18 @@ function renderFlash() {
       ctx.append(w.before, blank, w.after);
     }
   }
+  // 問題は 1 行に収める(長い読み: いっしょうけんめい など)
+  const qSize = flashFit([...q.textContent].length, 84);
+  q.style.fontSize = qSize + 'px';
+  q.dataset.size = qSize;
+  $('flash-card').classList.remove('answered');
   $('flash-a').hidden = true;
   $('flash-a').textContent = '';
   $('flash-show').hidden = false;
   $('flash-rate').hidden = true;
 }
 
-/** 答えを出す(書き取り: お手本(筆画の番号付き)、読み: 読み、百人一首: 歌) */
+/** 答えを出す(書き取り: 答えの語を大きく 1 行で(送りがなは小さく)、読み: 読み、百人一首: 歌) */
 async function showFlashAnswer() {
   const w = wordById(flash.queue[flash.index]);
   const kind = kindOf(w);
@@ -2101,47 +2112,32 @@ async function showFlashAnswer() {
     const parts = yomiParts(w.word, w.reading);
     const t = document.createElement('p');
     t.className = 'flash-reading';
+    t.style.fontSize = flashFit([...w.reading].length, 72) + 'px';
     const b = document.createElement('b');
     b.textContent = parts.write;
     t.append(parts.head, b, parts.tail);
     box.append(t);
   } else {
+    // 漢字は大きく、送りがなは半分の大きさで、1 行に収める
     const segs = segments(w.word);
-    const row = document.createElement('div');
-    row.className = 'flash-models';
-    const nk = segs.filter((s) => s.kanji).length;
-    const size = Math.max(90, Math.min(200, Math.floor((Math.min(globalThis.innerWidth || 400, 700) - 40) / Math.max(1, nk + 0.5))));
+    const KANA = 0.5;
+    const units = segs.reduce((n, s) => n + (s.kanji ? 1 : [...s.text].length * KANA), 0);
+    const size = flashFit(units, 132);
+    const line = document.createElement('p');
+    line.className = 'flash-word';
+    line.style.fontSize = size + 'px';
     for (const seg of segs) {
-      if (!seg.kanji) {
-        const k = document.createElement('span');
-        k.className = 'kana';
-        k.textContent = seg.text;
-        k.style.fontSize = Math.round(size * 0.42) + 'px';
-        row.appendChild(k);
-        continue;
-      }
-      let tmpl = null;
-      try {
-        tmpl = await getStrokes(seg.text);
-      } catch {
-        tmpl = null;
-      }
-      if (tmpl) {
-        const c = document.createElement('canvas');
-        c.className = 'model';
-        c.setAttribute('aria-label', `「${seg.text}」のお手本`);
-        row.appendChild(c);
-        drawModel(c, tmpl, size);
-      } else {
-        const t = document.createElement('span');
-        t.className = 'flash-char';
-        t.textContent = seg.text;
-        t.style.fontSize = Math.round(size * 0.8) + 'px';
-        row.appendChild(t);
-      }
+      const span = document.createElement('span');
+      span.className = seg.kanji ? 'k' : 'okuri';
+      span.textContent = seg.text;
+      line.appendChild(span);
     }
-    box.append(row);
+    box.append(line);
   }
+  // 答えを出したら、問題(読み)は小さくして上に
+  const q = $('flash-q');
+  q.style.fontSize = Math.max(20, Math.round(Number(q.dataset.size || 60) * 0.55)) + 'px';
+  $('flash-card').classList.add('answered');
   box.hidden = false;
   $('flash-show').hidden = true;
   $('flash-rate').hidden = false;

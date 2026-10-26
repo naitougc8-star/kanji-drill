@@ -300,7 +300,11 @@ for (const name of DEVICES) {
       await page.locator('#flash-show').tap();
       await expect(page.locator('#flash-rate')).toBeVisible();
       if (kind === 'kaki') {
-        await expect(page.locator('#flash-a canvas.model')).toHaveCount(2); // 満 員 のお手本
+        await expect(page.locator('#flash-a .flash-word')).toHaveText('満員'); // 答えの語(筆画の番号なし)
+        await expect(page.locator('#flash-a canvas')).toHaveCount(0);
+        // 1 行に収まっている
+        const lines = await page.locator('#flash-a .flash-word').evaluate((e) => Math.round(e.getBoundingClientRect().height / parseFloat(getComputedStyle(e).fontSize)));
+        expect(lines).toBeLessThanOrEqual(1);
         await shot(page, '8-flash-answer');
       }
       if (kind === 'yomi') await expect(page.locator('#flash-a .flash-reading')).toHaveText('さいなまれる');
