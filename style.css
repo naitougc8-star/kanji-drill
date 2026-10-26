@@ -416,6 +416,42 @@ details.fold > summary:focus-visible { outline: 2px solid var(--accent); outline
 .set-head { display: block; width: 100%; text-align: left; margin: 18px 0 2px; padding: 8px 12px; border: 0; border-left: 5px solid var(--muted); border-radius: 8px; background: transparent; color: var(--text); font: inherit; font-size: 17px; font-weight: 800; cursor: pointer; }
 .set-head.current { border-left-color: var(--accent); color: var(--accent); }
 
+/* フラッシュ出題 */
+.seg-drill-mode { margin: 6px 0 4px; }
+.seg-drill-mode label span { min-width: 8em; text-align: center; }
+.flash-start { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0 10px; }
+@media (max-width: 600px) { .flash-start { grid-template-columns: 1fr; } }
+.btn.btn-flash { background: #c55a11; border-color: #c55a11; color: #fff; }
+.btn.btn-flash:disabled { opacity: 0.45; }
+/* iPhone で片手で使いやすいように: 問題は上、ボタンは画面の下に固定 */
+.screen.flash { min-height: calc(100vh - 80px); display: flex; flex-direction: column; }
+.flash-card { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 8px; padding: 12px 0 140px; text-align: center; }
+.flash-q { font-size: clamp(44px, 12vw, 80px); font-weight: 800; letter-spacing: 0.06em; line-height: 1.2; }
+.flash-sub { font-size: clamp(22px, 6vw, 32px); color: var(--muted); }
+.flash-ctx { font-size: 20px; }
+.flash-ctx mark { background: none; color: var(--accent); font-weight: 700; text-decoration: underline; text-underline-offset: 4px; }
+.flash-a { margin-top: 12px; }
+.flash-models { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px; }
+.flash-models canvas.model { border: 2px solid #8a7f72; border-radius: 4px; }
+.flash-char { font-weight: 700; }
+.flash-reading { font-size: clamp(36px, 10vw, 60px); margin: 0; }
+.flash-reading b { color: var(--accent); }
+.flash-poem { font-size: clamp(20px, 5vw, 28px); font-weight: 700; margin: 0 0 6px; }
+.flash-poem-kana { font-size: clamp(18px, 4.5vw, 24px); color: var(--muted); margin: 0; }
+.flash-bar { position: sticky; bottom: 0; padding: 12px 0 calc(12px + env(safe-area-inset-bottom)); background: linear-gradient(to bottom, transparent, var(--bg) 30%); }
+.flash-bar .btn.big { margin-top: 0; min-height: 64px; font-size: 22px; }
+.flash-rate { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.flash-rate .flash-again { grid-column: 1 / -1; }
+.btn.flash-ok { background: var(--ok); border-color: var(--ok); color: #fff; }
+.btn.flash-maybe { background: #c55a11; border-color: #c55a11; color: #fff; }
+.btn.flash-again { background: var(--btn); color: var(--text); border-color: var(--line); }
+.flash-done { text-align: center; padding: 16px 0; }
+.flash-summary { font-size: 20px; font-weight: 700; }
+.flash-buttons-col { display: grid; gap: 10px; max-width: 480px; margin: 0 auto; }
+.flash-tag { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 13px; font-weight: 700; margin-right: 8px; border: 1px solid #c55a11; color: #c55a11; }
+.flash-tag.ok { border-color: var(--ok); color: var(--ok); }
+.flash-tag.again { border-color: var(--muted); color: var(--muted); }
+
 /* 確認・名前の入力の窓 */
 .ask { width: min(92vw, 480px); padding: 20px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); color: var(--text); }
 .ask::backdrop { background: rgba(0, 0, 0, 0.5); }

@@ -283,6 +283,53 @@ for (const name of DEVICES) {
     await expect(page.locator('#word-list ul[data-group="2"]')).toBeHidden();
     await expect(page.locator('#btn-start-wrong')).toHaveText('不合格の語だけ出題する(1 語)');
 
+    // フラッシュ出題: 問題 → 「答え」でお手本 → わかったかを選ぶ → 次の問題。選んだものは記録する
+    await page.locator('.group-head[data-group="1"] input[type="checkbox"]').check();
+    await page.locator('.seg-drill-mode label', { hasText: 'フラッシュ出題' }).tap();
+    await expect(page.locator('#normal-start-row')).toBeHidden();
+    await expect(page.locator('#btn-flash-all')).toHaveText('全問出題する(3 語)');
+    await expect(page.locator('#btn-flash-again')).toBeDisabled();
+    await page.locator('#btn-flash-all').tap();
+    const rates = ['ok', 'maybe', 'again'];
+    for (let i = 0; i < 3; i++) {
+      await expect(page.locator('#flash-show')).toBeVisible();
+      await expect(page.locator('#flash-progress')).toContainText(`フラッシュ ${i + 1} / 3 問`);
+      const kind = await page.locator('#screen-flash').getAttribute('data-kind');
+      await expect(page.locator('#flash-a')).toBeHidden();
+      if (kind === 'kaki') await shot(page, '7-flash-question');
+      await page.locator('#flash-show').tap();
+      await expect(page.locator('#flash-rate')).toBeVisible();
+      if (kind === 'kaki') {
+        await expect(page.locator('#flash-a canvas.model')).toHaveCount(2); // 満 員 のお手本
+        await shot(page, '8-flash-answer');
+      }
+      if (kind === 'yomi') await expect(page.locator('#flash-a .flash-reading')).toHaveText('さいなまれる');
+      if (kind === 'hyakunin') await expect(page.locator('#flash-a .flash-poem')).toContainText('天つ風');
+      await expectNoHorizontalScroll(page, `フラッシュ出題(${kind})`);
+      // 「答え」と選ぶボタンは、画面の中に見えている(iPhone の横向きでも)
+      const bar = await page.locator('#flash-rate').boundingBox();
+      expect(bar.y + bar.height, 'ボタンが画面の外').toBeLessThanOrEqual(info.h + 1);
+      await page.locator(`#flash-rate [data-rate="${rates[i]}"]`).tap();
+    }
+    await expect(page.locator('#flash-summary')).toHaveText('OK! 1 語 / Maybe OK 1 語 / もう一回 1 語');
+    await expect(page.locator('#flash-again-again')).toHaveText('もう一回だけ(1 語)');
+    await expect(page.locator('#flash-again-maybe')).toHaveText('Maybe OK 含む(2 語)');
+    await shot(page, '9-flash-done');
+    await page.locator('#flash-back').tap();
+    await expect(page.locator('#btn-flash-again')).toHaveText('もう一回だけ(1 語)');
+    await expect(page.locator('#btn-flash-maybe')).toHaveText('Maybe OK 含む(2 語)');
+    await expect(page.locator('#word-list .flash-tag')).toHaveCount(3);
+    // 出題のしかたと、選んだものは、再読み込みしても残る
+    await page.reload();
+    await expect(page.locator('#flash-start-row')).toBeVisible();
+    await expect(page.locator('#btn-flash-maybe')).toHaveText('Maybe OK 含む(2 語)');
+    // 「もう一回だけ」で 1 問だけ出る
+    await page.locator('#btn-flash-again').tap();
+    await expect(page.locator('#flash-progress')).toContainText('フラッシュ 1 / 1 問');
+    await page.locator('#flash-quit').tap();
+    await confirmAsk(page);
+    await expect(page.locator('#screen-setup')).toBeVisible();
+
     expect(problems, problems.join('\n')).toEqual([]);
     await context.close();
   });

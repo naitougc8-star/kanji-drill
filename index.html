@@ -169,7 +169,16 @@
           </span>
         </div>
         <p id="drill-scope" class="status drill-scope"></p>
-        <div class="start-row">
+        <div class="seg seg-drill-mode" role="radiogroup" aria-label="出題のしかた">
+          <label><input type="radio" name="drill-mode" value="flash"><span>フラッシュ出題</span></label>
+          <label><input type="radio" name="drill-mode" value="normal" checked><span>通常出題</span></label>
+        </div>
+        <div id="flash-start-row" class="start-row flash-start" hidden>
+          <button type="button" id="btn-flash-all" class="btn big btn-flash">全問出題する</button>
+          <button type="button" id="btn-flash-again" class="btn big btn-flash">もう一回だけ</button>
+          <button type="button" id="btn-flash-maybe" class="btn big btn-flash">Maybe OK 含む</button>
+        </div>
+        <div id="normal-start-row" class="start-row">
           <button type="button" id="btn-start" class="btn primary big">全問出題する</button>
           <div class="start-sub">
             <button type="button" id="btn-start-wrong" class="btn big btn-wrong">不合格の語だけ出題する</button>
@@ -262,6 +271,40 @@
           <button type="button" id="btn-override" class="btn">合格にする</button>
           <button type="button" id="btn-next" class="btn primary">次へ</button>
           <button type="button" id="btn-sanko" class="btn btn-sanko" hidden>参考</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- フラッシュ出題: 問題を見て答えを思い浮かべ、「答え」でお手本を見て、わかったかを自分で選ぶ(iPhone で使いやすい形) -->
+    <section id="screen-flash" class="screen flash" hidden>
+      <div class="drill-head">
+        <span id="flash-progress" class="progress"></span>
+        <span class="drill-actions">
+          <button type="button" id="flash-quit" class="btn small">やめる</button>
+        </span>
+      </div>
+      <div id="flash-card" class="flash-card">
+        <div id="flash-q" class="flash-q"></div>
+        <div id="flash-sub" class="flash-sub"></div>
+        <div id="flash-ctx" class="context flash-ctx"></div>
+        <div id="flash-a" class="flash-a" hidden></div>
+      </div>
+      <div id="flash-done" class="flash-done" hidden>
+        <p class="score">フラッシュ出題 おわり</p>
+        <p id="flash-summary" class="flash-summary"></p>
+        <div class="flash-buttons-col">
+          <button type="button" id="flash-again-again" class="btn big btn-flash">もう一回だけ</button>
+          <button type="button" id="flash-again-maybe" class="btn big btn-flash">Maybe OK 含む</button>
+          <button type="button" id="flash-again-all" class="btn big">全問もう一度</button>
+          <button type="button" id="flash-back" class="btn big">設定に戻る</button>
+        </div>
+      </div>
+      <div id="flash-bar" class="flash-bar">
+        <button type="button" id="flash-show" class="btn big btn-flash">答え</button>
+        <div id="flash-rate" class="flash-rate" hidden>
+          <button type="button" data-rate="maybe" class="btn big flash-maybe">Maybe OK</button>
+          <button type="button" data-rate="ok" class="btn big flash-ok">OK!</button>
+          <button type="button" data-rate="again" class="btn big flash-again">もう一回</button>
         </div>
       </div>
     </section>

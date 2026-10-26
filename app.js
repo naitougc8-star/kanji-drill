@@ -23,7 +23,7 @@ const state = {
   sets: [], // テスト(出題の範囲)
   folders: [], // フォルダーの名前(テストの入っていない、作っただけのフォルダーも)
   currentSet: null, // 選んでいるテスト
-  settings: { level: DEFAULT_LEVEL, checkOrder: false, vertical: false, srcMode: 'print', theme: 'auto', folds: {}, groupFolds: [], drillSets: null, treeOpen: null },
+  settings: { level: DEFAULT_LEVEL, checkOrder: false, vertical: false, srcMode: 'print', theme: 'auto', folds: {}, groupFolds: [], drillSets: null, treeOpen: null, drillMode: 'normal' },
   session: null,
 };
 
@@ -70,6 +70,7 @@ function restoreSaved() {
         photo: Number.isInteger(w.photo) ? w.photo : w.photo === null ? null : undefined, // テストの中の何枚目の写真か
         ...(w.kind === 'yomi' || w.kind === 'hyakunin' ? { kind: w.kind } : {}), // 問題の種類(書き取りは付けない)
         ...(Number.isInteger(w.no) ? { no: w.no } : {}), // 百人一首の歌の番号
+        ...(FLASH_LABEL[w.flash] ? { flash: w.flash } : {}), // フラッシュ出題で選んだ、わかったか(OK / Maybe OK / もう一回)
       }));
   }
   if (Array.isArray(saved.sets)) state.sets = saved.sets;
@@ -82,6 +83,7 @@ function restoreSaved() {
     state.settings.checkOrder = !!saved.settings.checkOrder;
     state.settings.vertical = !!saved.settings.vertical;
     if (saved.settings.srcMode === 'text') state.settings.srcMode = 'text';
+    if (saved.settings.drillMode === 'flash') state.settings.drillMode = 'flash';
     // 1・2・4 の欄を開いているか(false = 閉じている)
     if (saved.settings.folds && typeof saved.settings.folds === 'object') {
       for (const [k, v] of Object.entries(saved.settings.folds)) if (typeof v === 'boolean') state.settings.folds[k] = v;
@@ -149,7 +151,7 @@ function hideMessage() {
 }
 
 function showScreen(name) {
-  for (const s of ['setup', 'drill', 'result']) $('screen-' + s).hidden = s !== name;
+  for (const s of ['setup', 'drill', 'flash', 'result']) $('screen-' + s).hidden = s !== name;
   globalThis.scrollTo?.(0, 0);
 }
 
@@ -887,6 +889,7 @@ function resetResults(words) {
     w.result = null;
     w.misses = 0;
     w.passedAt = null;
+    delete w.flash;
     w.updatedAt = Date.now();
   }
   persist();
@@ -987,6 +990,13 @@ function wordRow(w) {
   const meta = document.createElement('div');
   meta.className = 'meta';
   meta.appendChild(resultBadge(w));
+  if (w.flash) {
+    const f = document.createElement('span');
+    f.className = `flash-tag ${w.flash}`;
+    f.textContent = `⚡ ${FLASH_LABEL[w.flash]}`;
+    f.title = 'フラッシュ出題で選んだもの';
+    meta.appendChild(f);
+  }
   if (kindOf(w) !== 'kaki') {
     const k = document.createElement('span');
     k.className = `kind-tag ${kindOf(w)}`;
@@ -1488,6 +1498,15 @@ function updateCount() {
   const fresh = list.filter((w) => !w.result).length;
   $('btn-start-new').disabled = fresh === 0;
   $('btn-start-new').textContent = `未出題の語だけ出題する(${fresh} 語)`;
+  // フラッシュ出題
+  const fAgain = list.filter((w) => w.flash === 'again').length;
+  const fMaybe = list.filter((w) => w.flash === 'again' || w.flash === 'maybe').length;
+  $('btn-flash-all').disabled = n === 0;
+  $('btn-flash-all').textContent = `全問出題する(${n} 語)`;
+  $('btn-flash-again').disabled = fAgain === 0;
+  $('btn-flash-again').textContent = `もう一回だけ(${fAgain} 語)`;
+  $('btn-flash-maybe').disabled = fMaybe === 0;
+  $('btn-flash-maybe').textContent = `Maybe OK 含む(${fMaybe} 語)`;
   // 区分ごとの集計: 「出題する」にチェックの入っている語が分母(チェックを変えるたびに計算し直す)
   const sum = $('result-summary');
   sum.textContent = '';
@@ -1993,6 +2012,168 @@ function onOverride() {
   updateVerdict();
 }
 
+// ---------- フラッシュ出題 ----------
+
+const FLASH_LABEL = { ok: 'OK', maybe: 'Maybe OK', again: 'もう一回' };
+let flash = null; // { queue, index, counts }
+
+/** 出題のしかた(フラッシュ / 通常)を切り替える */
+function setDrillMode(mode) {
+  state.settings.drillMode = mode;
+  for (const r of document.querySelectorAll('input[name="drill-mode"]')) r.checked = r.value === mode;
+  $('flash-start-row').hidden = mode !== 'flash';
+  $('normal-start-row').hidden = mode === 'flash';
+}
+
+/**
+ * フラッシュ出題を始める。
+ * @param {'all' | 'again' | 'maybe'} which 全問 / 「もう一回」を選んだ語だけ / 「もう一回」と「Maybe OK」を選んだ語
+ */
+function startFlash(which = 'all') {
+  hideMessage();
+  const ids = playable()
+    .filter((w) => (which === 'again' ? w.flash === 'again' : which === 'maybe' ? w.flash === 'again' || w.flash === 'maybe' : true))
+    .map((w) => w.id);
+  if (!ids.length) {
+    showMessage({ again: '「もう一回」の語はありません。', maybe: '「もう一回」「Maybe OK」の語はありません。' }[which] || '出題する語がありません。');
+    return;
+  }
+  flash = { queue: shuffle(ids), index: 0, counts: { ok: 0, maybe: 0, again: 0 }, title: drillTitle() };
+  showScreen('flash');
+  $('flash-done').hidden = true;
+  $('flash-card').hidden = false;
+  $('flash-bar').hidden = false;
+  renderFlash();
+}
+
+/** フラッシュ出題の 1 問(問題だけを出し、答えは隠す) */
+function renderFlash() {
+  const w = wordById(flash.queue[flash.index]);
+  const kind = kindOf(w);
+  $('flash-progress').textContent = `${flash.title} フラッシュ ${flash.index + 1} / ${flash.queue.length} 問`;
+  $('screen-flash').dataset.word = w.word;
+  $('screen-flash').dataset.kind = kind;
+  const q = $('flash-q'), sub = $('flash-sub'), ctx = $('flash-ctx');
+  sub.textContent = '';
+  ctx.textContent = '';
+  if (kind === 'hyakunin') {
+    const p = poemParts(w.word, w.reading, w.before);
+    q.textContent = `${questionText(w)} …`;
+    sub.textContent = `${p.givenKana}${p.hint ? ' ' + p.hint : ''} …`;
+    ctx.textContent = '百人一首: 続きは?';
+  } else if (kind === 'yomi') {
+    q.textContent = w.word;
+    if (w.before || w.after) {
+      const m = document.createElement('mark');
+      m.textContent = w.word;
+      ctx.append(w.before, m, w.after);
+    } else ctx.textContent = '読みは?';
+  } else {
+    q.textContent = w.reading || '(読みなし)';
+    if (w.before || w.after) {
+      const blank = document.createElement('span');
+      blank.className = 'blank';
+      blank.textContent = '　'.repeat(Math.max(2, [...w.word].length));
+      ctx.append(w.before, blank, w.after);
+    }
+  }
+  $('flash-a').hidden = true;
+  $('flash-a').textContent = '';
+  $('flash-show').hidden = false;
+  $('flash-rate').hidden = true;
+}
+
+/** 答えを出す(書き取り: お手本(筆画の番号付き)、読み: 読み、百人一首: 歌) */
+async function showFlashAnswer() {
+  const w = wordById(flash.queue[flash.index]);
+  const kind = kindOf(w);
+  const box = $('flash-a');
+  box.textContent = '';
+  if (kind === 'hyakunin') {
+    const t = document.createElement('p');
+    t.className = 'flash-poem';
+    t.textContent = w.word;
+    const k = document.createElement('p');
+    k.className = 'flash-poem-kana';
+    k.textContent = w.reading;
+    box.append(t, k);
+  } else if (kind === 'yomi') {
+    const parts = yomiParts(w.word, w.reading);
+    const t = document.createElement('p');
+    t.className = 'flash-reading';
+    const b = document.createElement('b');
+    b.textContent = parts.write;
+    t.append(parts.head, b, parts.tail);
+    box.append(t);
+  } else {
+    const segs = segments(w.word);
+    const row = document.createElement('div');
+    row.className = 'flash-models';
+    const nk = segs.filter((s) => s.kanji).length;
+    const size = Math.max(90, Math.min(200, Math.floor((Math.min(globalThis.innerWidth || 400, 700) - 40) / Math.max(1, nk + 0.5))));
+    for (const seg of segs) {
+      if (!seg.kanji) {
+        const k = document.createElement('span');
+        k.className = 'kana';
+        k.textContent = seg.text;
+        k.style.fontSize = Math.round(size * 0.42) + 'px';
+        row.appendChild(k);
+        continue;
+      }
+      let tmpl = null;
+      try {
+        tmpl = await getStrokes(seg.text);
+      } catch {
+        tmpl = null;
+      }
+      if (tmpl) {
+        const c = document.createElement('canvas');
+        c.className = 'model';
+        c.setAttribute('aria-label', `「${seg.text}」のお手本`);
+        row.appendChild(c);
+        drawModel(c, tmpl, size);
+      } else {
+        const t = document.createElement('span');
+        t.className = 'flash-char';
+        t.textContent = seg.text;
+        t.style.fontSize = Math.round(size * 0.8) + 'px';
+        row.appendChild(t);
+      }
+    }
+    box.append(row);
+  }
+  box.hidden = false;
+  $('flash-show').hidden = true;
+  $('flash-rate').hidden = false;
+}
+
+/** わかったかを記録して、次の問題へ */
+function rateFlash(rate) {
+  const w = wordById(flash.queue[flash.index]);
+  w.flash = rate;
+  w.updatedAt = Date.now();
+  flash.counts[rate]++;
+  persist();
+  flash.index++;
+  if (flash.index < flash.queue.length) renderFlash();
+  else finishFlash();
+}
+
+function finishFlash() {
+  const c = flash.counts;
+  $('flash-card').hidden = true;
+  $('flash-bar').hidden = true;
+  $('flash-done').hidden = false;
+  $('flash-progress').textContent = `${flash.title} フラッシュ ${flash.queue.length} 問`;
+  $('flash-summary').textContent = `OK! ${c.ok} 語 / Maybe OK ${c.maybe} 語 / もう一回 ${c.again} 語`;
+  const again = flash.queue.filter((id) => wordById(id).flash === 'again').length;
+  const maybe = flash.queue.filter((id) => ['again', 'maybe'].includes(wordById(id).flash)).length;
+  $('flash-again-again').textContent = `もう一回だけ(${again} 語)`;
+  $('flash-again-again').disabled = again === 0;
+  $('flash-again-maybe').textContent = `Maybe OK 含む(${maybe} 語)`;
+  $('flash-again-maybe').disabled = maybe === 0;
+}
+
 /** スキップ: 判定しない(成績も記録しない)で、この回の最後にもう一度出す */
 function onSkip() {
   const s = state.session;
@@ -2443,6 +2624,33 @@ function init() {
   $('btn-clear-all').addEventListener('click', onClearAll);
   $('btn-judge').addEventListener('click', onJudge);
   $('btn-skip').addEventListener('click', onSkip);
+  // フラッシュ出題
+  for (const r of document.querySelectorAll('input[name="drill-mode"]')) {
+    r.addEventListener('change', () => {
+      if (!r.checked) return;
+      setDrillMode(r.value);
+      persist();
+    });
+  }
+  setDrillMode(state.settings.drillMode);
+  $('btn-flash-all').addEventListener('click', () => startFlash('all'));
+  $('btn-flash-again').addEventListener('click', () => startFlash('again'));
+  $('btn-flash-maybe').addEventListener('click', () => startFlash('maybe'));
+  $('flash-show').addEventListener('click', showFlashAnswer);
+  for (const b of document.querySelectorAll('#flash-rate [data-rate]')) b.addEventListener('click', () => rateFlash(b.dataset.rate));
+  $('flash-again-again').addEventListener('click', () => startFlash('again'));
+  $('flash-again-maybe').addEventListener('click', () => startFlash('maybe'));
+  $('flash-again-all').addEventListener('click', () => startFlash('all'));
+  const backFromFlash = () => {
+    flash = null;
+    renderWordList();
+    showScreen('setup');
+  };
+  $('flash-back').addEventListener('click', backFromFlash);
+  $('flash-quit').addEventListener('click', async () => {
+    if (!(await ask('フラッシュ出題をやめて、設定の画面に戻りますか?(ここまでに選んだものは記録されています)'))) return;
+    backFromFlash();
+  });
   // 百人一首の入力欄: Enter で判定(かな漢字変換の確定の Enter は除く)
   $('kana-input').addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) {
