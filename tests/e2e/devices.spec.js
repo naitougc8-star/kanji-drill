@@ -153,6 +153,20 @@ for (const name of DEVICES) {
     await folder.locator('.tree-folder-name').tap();
     await confirmAsk(page, '2学期のテスト');
     await expect(page.locator('#set-tree .tree-folder-name')).toHaveText('📁 2学期のテスト');
+    // チェックの連動(タップで): 写真を全部外すとテストも外れ、テストに入れると写真にも全部入る
+    const t1 = page.locator('#set-tree .tree-set').first();
+    for (const g of ['1', '2']) await t1.locator(`.tree-group[data-group="${g}"] input`).tap();
+    await expect(t1.locator('.tree-row .tree-check')).not.toBeChecked();
+    await expect(page.locator('#btn-start')).toBeDisabled();
+    await t1.locator('.tree-row .tree-check').tap();
+    expect(await t1.locator('.tree-group input').evaluateAll((els) => els.map((e) => e.checked))).toEqual([true, true]);
+    await expect(page.locator('#btn-start')).toHaveText('全問出題する(3 語)');
+    await shot(page, '0-tree');
+    // 消したいものにチェックがないと、削除しない
+    await t1.locator('.tree-row .tree-check').tap();
+    await page.locator('#btn-set-delete').tap();
+    await expect(page.locator('#message')).toContainText('削除するテスト(またはフォルダー)にチェックを入れてください');
+    await t1.locator('.tree-row .tree-check').tap();
     // 写真のまとまりの名前を変える(12 文字まで)。数は「問」
     const g1 = page.locator('.group-head[data-group="1"]');
     await expect(g1.locator('.gcount')).toHaveText('2 問');
